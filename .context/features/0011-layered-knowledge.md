@@ -1,7 +1,7 @@
 ---
 id: FEAT-0011
 type: feature
-status: shelved
+status: planned
 priority: p2
 last-verified: 2026-11-04
 release: null
@@ -18,8 +18,8 @@ Knowledge, not only rules, comes in layers: a repo's own `.context/`, then the c
 ## Acceptance scenarios
 - Given a repo that `extends:` a context repo, then `canon` search and the band read that repo's `.context/` after the repo's own, closest first.
 - Given a repo with no `extends:`, then nothing changes.
-- Given the person's own context repo, then it is read last, in every repo.
-- Given the same fact with two values in two layers, then `canon check` warns and names both files; it never picks one silently.
+- Given the person's own context repo, then it is the last layer, in every repo: its rules override the repo's, and its pages rank first in search (owner, 2026-11-07).
+- Given the same fact or rule with two values in two layers, then the later layer wins and `canon check` warns, naming both files; it never overrides silently.
 - Given a value under `locked:` in a higher layer, then a lower layer that changes it fails `canon check`.
 - Given a layer the person cannot clone (a private team repo), then it is skipped without an error and nothing about it is shown.
 - Given a context repo marked `visibility: restricted`, then no command copies or moves its content into a less private layer, and `canon check` fails if a less private repo quotes it.
@@ -43,10 +43,17 @@ Knowledge, not only rules, comes in layers: a repo's own `.context/`, then the c
 - The person's own settings are a file in their personal context repo. It holds only that person's settings: no organization, no repo settings, no organization or repo names. A repo's settings stay in that repo's own `.context/` (local only where it cannot be pushed) (2026-11-04).
 - An outside knowledge tool is fetched on demand through its connector; nothing from it is copied to disk (2026-11-04).
 - "The same fact in two layers" means the same canonical value (a named value in an entity table); other lines are not compared (2026-11-04).
+- Layer order: organization, then organization-restricted, then the repo, then the person's own; each overrides the one before it with a warning, and locked keys hold (owner, 2026-11-07; [rule-layers](../wiki/decisions/rule-layers.md)).
+- The person's own repo is a configurable path to their personal git repo; canon asks for it when it is not set (owner, 2026-11-07).
 - Search uses one index per person per machine, built only from the layers that person can read there, kept outside every repo and never pushed (2026-11-04).
 
 ## Open questions
-- How canon finds the person's own context repo on a machine: a fixed default path, or an environment variable.
+- None. How canon finds the person's own repo was decided on 2026-11-07 (see Decided).
 
 ## Store copy
-> Company, team and personal knowledge in layers: the closest answer first, conflicts shown, private stays private.
+> Company, team and personal knowledge in layers: your own rules last and first in search, conflicts shown, private stays private.
+
+## Verdict
+- 2026-11-07 · do-it-differently · proceeded · C-03, C-02, C-01, C-04, C-06 · Restart FEAT-0011 layered knowledge for Aaroh, with the owner's layer order
+  - Size: medium
+  - Claims: 3/5 backed

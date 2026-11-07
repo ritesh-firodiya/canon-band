@@ -1,5 +1,5 @@
 ---
-last-verified: 2026-11-02
+last-verified: 2026-11-06
 ---
 # Rule layers
 
@@ -12,6 +12,11 @@ organization, product, team. Then its own `context.yaml`, then the uncommitted
 - A named pipeline replaces only that name.
 - Standards replace by file name.
 - Principles only add.
+
+**Order (owner, 2026-11-07; aaroh `raw/2026-11-07-owner-canon-layers.md`):** organization,
+then organization-restricted, then the repo, then the person's own rules last, from a
+configurable path to their personal git repo (canon asks when it is unset). Each layer
+overrides the one before with a warning; `locked:` keys still hold. Not built yet (FEAT-0011).
 
 **Why:** one company has many products and teams. Each sets its own rules, while a
 few, like security review, stay fixed. Files in git keep rules reviewable.
