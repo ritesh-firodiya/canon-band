@@ -1,11 +1,19 @@
 # Changelog
 
-## 7.1.0 — 2026-11-16
+## 8.0.0 — 2026-11-16
 
 ### Changed
 
-- **Usage counts up.** 7D and 5H show the share used, from 0%: amber from 60%, red from 80% with the reset time.
-- **Context in tokens, from load.** ctx shows the tokens in the window (`ctx 23k`) before the first reply, from Claude Code's local estimate. A click shows what fills it, largest first, then what is free.
+- **Renamed to canon-band.** Install it with `claude plugin install canon-band@canon-band` from `ritesh-firodiya/canon-band`, after `claude plugin uninstall canon@canon`.
+- **The facts go under the prompt.** Cost, 7D, 5H and ctx follow Claude Code's own hint line. The controls stay in one row above, since the terminal draws no buttons under the prompt.
+- **Usage counts up.** 7D and 5H show the share used, from 0%. From 80% a warning in red shows above the prompt with the reset time.
+- **Context in tokens, from load.** ctx shows the tokens in the window (`ctx 23k`) before the first reply, from Claude Code's local estimate. ⓘ shows what fills it, largest first, then what is free.
+- **Short, plain replies.** The reply size starts at S, and every size asks for plain words, the way a person talks. Only prompts the person types carry it: SDK runs, schedules and other agents do not.
+
+### Added
+
+- **Modes: assisted and manual.** In assisted, Claude ends a choice with a `Recommend:` line, and a **Go with it** button sends it on.
+- **A yes before anything risky.** Deletes, pushes, deploys, releases, visibility changes, live money commands and reading secrets wait for **Allow once**, in every mode, in the person's own sessions.
 
 ## 7.0.0 — 2026-11-16
 

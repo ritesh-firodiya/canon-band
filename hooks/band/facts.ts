@@ -1,19 +1,16 @@
 // Pure helpers for the band: no `$`, so the tests call them directly.
 
 import { priceOf } from './prices'
-import type { CacheFacts, ContextFacts, ContextRow, Info, Level, ReplySize, UsageWindow } from './types'
+import type { CacheFacts, ContextFacts, ContextRow, Info, Level, Mode, ReplySize, UsageWindow } from './types'
 
 export const TTL_MS = 60 * 60 * 1000
 const HIGH_AT = 80
 const WARN_AT = 60
 const PER_MILLION = 1_000_000
-const NARROW_BELOW = 110
 
 export const money = (usd: number): string => `$${usd.toFixed(2)}`
 const CENT = 0.01
 const round = (usd: number): string => (usd < CENT ? '<$0.01' : `$${usd.toFixed(2)}`)
-
-export const isNarrow = (columns: number): boolean => columns < NARROW_BELOW
 
 export function duration(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60000))
@@ -105,19 +102,54 @@ export const SIZES: readonly ReplySize[] = ['S', 'M', 'L']
 export const nextSize = (size: ReplySize): ReplySize => SIZES[(SIZES.indexOf(size) + 1) % SIZES.length] as ReplySize
 
 const SIZE_WORDS: Record<ReplySize, string> = {
-  S: 'one to three lines, no headings or tables',
+  S: 'one to three short lines, no headings or tables',
   M: 'the answer first, then a short bullet list',
   L: 'the answer first, then steps, reasons and trade-offs',
 }
 
-/** What the model reads beside each prompt, so the size holds without touching the cached system prompt. */
-export const replyRule = (size: ReplySize): string => `Reply size ${size}: write ${SIZE_WORDS[size]}. The person set this on the band; it overrides other length guidance.`
+export const MODES: readonly Mode[] = ['assisted', 'manual']
+export const nextMode = (mode: Mode): Mode => (mode === 'assisted' ? 'manual' : 'assisted')
 
-/** A typed prompt: not a slash command, and not one a mod sent. Only these carry the reply size. */
-export const isTyped = (text: string, fromPlugin: boolean): boolean => !fromPlugin && text.trim() !== '' && !text.trimStart().startsWith('/')
+const RECOMMEND = 'Recommend:'
+const ASSISTED_RULE = `When you end with a choice the person can accept, add one last line: "${RECOMMEND} <what you would do, in a few plain words>".`
+
+/** What the model reads beside each prompt, so the size and mode hold without touching the cached system prompt. */
+export function replyRule(size: ReplySize, mode: Mode): string {
+  const rule = `Reply size ${size}: write ${SIZE_WORDS[size]}, in plain words, the way a person talks. The person set this on the band; it overrides other length guidance.`
+  return mode === 'assisted' ? `${rule} ${ASSISTED_RULE}` : rule
+}
+
+// The person's own message: Enter at the prompt, or the phone through Remote Control. Never an SDK run, a schedule or another agent.
+const PERSON = new Set(['composer', 'bridge'])
+
+/** A prompt the person typed, not a slash command. Only these carry the reply rule. */
+export const isTyped = (text: string, origin: string): boolean => PERSON.has(origin) && text.trim() !== '' && !text.trimStart().startsWith('/')
+
+/** The last "Recommend:" line of an answer, or null when it has none. */
+export function recommendationOf(answer: string): string | null {
+  const lines = answer.split('\n').map(l => l.replace(/[*_`]/g, '').trim())
+  const last = lines.filter(l => l.startsWith(RECOMMEND)).at(-1)
+  const text = last?.slice(RECOMMEND.length).trim()
+  return text ? text : null
+}
+
+/** The facts under the prompt, dim, after Claude's own hint. */
+export function hintTail(sessionUsd: number, windows: readonly WindowView[], context: ContextView | null): string {
+  return [money(sessionUsd), ...windows.map(w => w.label), context?.label].filter(Boolean).join(' · ')
+}
+
+/** What runs out soon, in colour above the prompt, since the line below is dim. */
+export function warningOf(windows: readonly WindowView[], context: ContextView | null): string | null {
+  const parts = [
+    ...windows.filter(w => w.level === 'bad').map(w => `${w.name} ${w.used}% used${w.reset ? `, resets in ${w.reset}` : ''}`),
+    context?.level === 'bad' ? `ctx ${tokens(context.tokens)} of ${tokens(context.window)}, compact soon` : null,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : null
+}
 
 export interface InfoFacts {
   isAwake: boolean
+  mode: Mode
   size: ReplySize
   sessionUsd: number
   windows: readonly WindowView[]
@@ -134,6 +166,11 @@ export function infoLine(info: Info, f: InfoFacts): string {
   }
   if (info === 'awake') return f.isAwake ? '☀ Awake: this Mac will not sleep while this session is open. Click again to let it sleep.' : '☼ This session is not keeping the Mac awake. Click to keep it awake while this session is open.'
   if (info === 'size') return `Reply size ${f.size}: ${SIZE_WORDS[f.size]}. Click again for the next size.`
+  if (info === 'mode') return f.mode === 'assisted' ? 'Assisted: when Claude recommends something, a button above the prompt goes with it. Click for manual.' : 'Manual: no recommendation button. Click for assisted.'
+  if (info === 'info') {
+    const usage = f.windows.length ? f.windows.map(w => `${w.name} ${w.used}% used${w.reset ? `, resets in ${w.reset}` : ''}`).join(', ') : 'no usage reading yet'
+    return `This session has spent ${money(f.sessionUsd)}; ${usage}.\n${infoLine('ctx', f)}`
+  }
   if (info === 'cost') return `This session has spent ${money(f.sessionUsd)}.`
   if (info === '7D') return limit('7D', 'weekly')
   if (info === '5H') return limit('5H', 'five-hour')

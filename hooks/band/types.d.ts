@@ -1,6 +1,9 @@
-export type Info = 'awake' | 'size' | 'cost' | '7D' | '5H' | 'ctx' | 'cache'
+export type Info = 'awake' | 'mode' | 'size' | 'info' | 'cost' | '7D' | '5H' | 'ctx' | 'cache'
 export type Level = 'ok' | 'warn' | 'bad'
 export type ReplySize = 'S' | 'M' | 'L'
+export type Mode = 'manual' | 'assisted'
+
+export type Blocked = { command: string; what: string }
 
 export type CacheFacts = { lastAt: number; tokens: number; model: string | null }
 
@@ -12,7 +15,7 @@ export type UsageWindow = { kind: string; percentUsed: number; resetsAt?: string
 
 declare module 'claude-code' {
   interface PluginState {
-    canon: {
+    'canon-band': {
       windows: UsageWindow[]
       cache: CacheFacts | null
       taskUsd: number
@@ -22,6 +25,9 @@ declare module 'claude-code' {
       breakdown: ContextRow[] | null
       isAwake: boolean
       replySize: ReplySize
+      mode: Mode
+      recommendation: string | null
+      blocked: Blocked | null
     }
   }
 }

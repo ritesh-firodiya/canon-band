@@ -1,11 +1,12 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { breakdownLine, cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextSize, replyRule, tokens, windowViews } from './facts'
+import { breakdownLine, cacheView, canExtend, coldLabel, contextView, extendLabel, hintTail, infoLine, isTyped, nextMode, nextSize, recommendationOf, replyRule, tokens, warningOf, windowViews } from './facts'
+import { commandRisk, readRisk } from './guard'
 import { priceOf } from './prices'
 
 const OPUS = 'claude-opus-5-5'
 const render = (surface: 'terminal' | 'desktop', columns = 140, isWorking = false) =>
-  ({ plugin: 'canon', component: 'AbovePrompt', surface, props: { hasSurvey: false, isWorking, maxRows: 12, bodyColumns: columns, scroll: { offset: 0, bodyRows: 12 }, view: {} } }) as const
+  ({ plugin: 'canon-band', component: 'AbovePrompt', surface, props: { hasSurvey: false, isWorking, maxRows: 12, bodyColumns: columns, scroll: { offset: 0, bodyRows: 12 }, view: {} } }) as const
 
 const NOW = Date.parse('2026-11-02T10:00:00Z')
 
@@ -91,21 +92,52 @@ test('the breakdown lists what fills the window, largest first, then what is fre
   expect(breakdownLine(ROWS)).toBe('System tools 14k · Messages 6k · System prompt 3.1k · Free space 144k · Autocompact buffer 33k')
 })
 
-test('reply size goes S, M, L and round, and each size tells the model what to write', () => {
+test('reply size goes S, M, L and round, and each size tells the model what to write in plain words', () => {
   expect([nextSize('S'), nextSize('M'), nextSize('L')]).toEqual(['M', 'L', 'S'])
-  expect(replyRule('S')).toContain('one to three lines')
-  expect(replyRule('L')).toContain('trade-offs')
+  expect(replyRule('S', 'manual')).toContain('one to three short lines, no headings or tables, in plain words')
+  expect(replyRule('L', 'manual')).toContain('trade-offs')
+  expect(replyRule('S', 'manual')).not.toContain('Recommend:')
+  expect(replyRule('S', 'assisted')).toContain('"Recommend: <what you would do')
+  expect([nextMode('assisted'), nextMode('manual')]).toEqual(['manual', 'assisted'])
 })
 
-test('slash commands and messages from a mod do not carry the reply size', () => {
-  expect(isTyped('why?', false)).toBe(true)
-  expect(isTyped('/clear', false)).toBe(false)
-  expect(isTyped('why?', true)).toBe(false)
-  expect(isTyped('  ', false)).toBe(false)
+test('only what the person types carries the rule: not slash commands, SDK runs, schedules or other agents', () => {
+  expect(isTyped('why?', 'composer')).toBe(true)
+  expect(isTyped('why?', 'bridge')).toBe(true)
+  expect(isTyped('/clear', 'composer')).toBe(false)
+  expect(isTyped('  ', 'composer')).toBe(false)
+  for (const origin of ['sdk', 'plugin', 'scheduled-trigger', 'peer', 'coordinator', 'unclassified']) expect(isTyped('why?', origin)).toBe(false)
+})
+
+test('the last Recommend: line is the pick, markdown and all', () => {
+  expect(recommendationOf('Two ways.\n\nRecommend: rename the repo to canon-band')).toBe('rename the repo to canon-band')
+  expect(recommendationOf('**Recommend:** keep it\nRecommend: `drop it`')).toBe('drop it')
+  expect(recommendationOf('Done. Tests pass.')).toBeNull()
+  expect(recommendationOf('Recommend:')).toBeNull()
+})
+
+test('critical commands need the person, everyday ones do not', () => {
+  const critical = ['rm -rf dist', 'rm -r old', 'cd x && git push origin main', 'git push --force', 'git reset --hard HEAD~1', 'git clean -fd', 'git branch -D old', 'psql -c "DROP TABLE users"', 'pnpm prisma migrate reset', 'vercel --prod', 'firebase deploy', 'eas submit -p ios', 'npm publish', 'npm deprecate x "gone"', 'gh release create v1', 'gh repo delete me/x', 'gh repo edit --visibility public', 'stripe charges create --live', 'cat .env', 'cat apps/web/.env.local', 'cp key.p8 /tmp', 'ls ~/git/local/secrets']
+  const everyday = ['git status', 'git log -3', 'rm file.txt', 'git pull', 'pnpm test', 'cat .env.example', 'grep -r environment src', 'git commit -m "push the band below" -- README.md', 'npm view x version']
+  for (const c of critical) expect([c, commandRisk(c)]).toEqual([c, expect.any(String)])
+  for (const c of everyday) expect([c, commandRisk(c)]).toEqual([c, null])
+  expect(readRisk('/w/shop/.env')).toBe('reading a secret')
+  expect(readRisk('/w/shop/.env.example')).toBeNull()
+  expect(readRisk('/Users/me/git/local/secrets/x/key')).toBe('reading a secret')
+  expect(readRisk('/w/shop/src/env.ts')).toBeNull()
+})
+
+test('the facts under the prompt, and a warning above only when something runs out', () => {
+  const usage = windowViews([{ kind: 'seven_day', percentUsed: 59 }, { kind: 'five_hour', percentUsed: 4 }], NOW)
+  expect(hintTail(1.2, usage, contextView({ tokens: 23_300, window: 200_000, percent: 12 }))).toBe('$1.20 · 7D 59% · 5H 4% · ctx 23k')
+  expect(hintTail(0, [], null)).toBe('$0.00')
+  expect(warningOf(usage, null)).toBeNull()
+  const high = windowViews([{ kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T19:00:00Z' }], NOW)
+  expect(warningOf(high, contextView({ tokens: 176_000, window: 200_000, percent: 88 }))).toBe('7D 91% used, resets in 3d 9h · ctx 176k of 200k, compact soon')
 })
 
 test('a click on a short item says what it means in one line', () => {
-  const base = { isAwake: false, size: 'M' as const, sessionUsd: 1.2, windows: windowViews([{ kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T09:00:00Z' }], Date.parse('2026-11-02T00:00:00Z')), context: contextView({ tokens: 80_000, window: 200_000, percent: 40 }), breakdown: null, cache: null }
+  const base = { isAwake: false, mode: 'assisted' as const, size: 'M' as const, sessionUsd: 1.2, windows: windowViews([{ kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T09:00:00Z' }], Date.parse('2026-11-02T00:00:00Z')), context: contextView({ tokens: 80_000, window: 200_000, percent: 40 }), breakdown: null, cache: null }
   expect(infoLine('awake', base)).toContain('not keeping the Mac awake')
   expect(infoLine('awake', { ...base, isAwake: true })).toContain('will not sleep')
   expect(infoLine('size', base)).toContain('short bullet list')
@@ -114,21 +146,19 @@ test('a click on a short item says what it means in one line', () => {
   expect(infoLine('5H', base)).toBe('5H: no reading yet.')
   expect(infoLine('ctx', base)).toBe('ctx: 80k of 200k tokens used (40%).')
   expect(infoLine('ctx', { ...base, breakdown: ROWS })).toContain('\nSystem tools 14k · Messages 6k')
-})
-
-test('a narrow terminal uses two rows', () => {
-  expect(isNarrow(80)).toBe(true)
-  expect(isNarrow(120)).toBe(false)
+  expect(infoLine('mode', base)).toContain('Assisted')
+  expect(infoLine('info', base)).toBe('This session has spent $1.20; 7D 91% used, resets in 3d 9h.\nctx: 80k of 200k tokens used (40%).')
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`on ${surface}, the band draws the sun, the cost and the reply size`, async ($, on) => {
+  test(`on ${surface}, the controls above the prompt: the sun, the mode, the reply size and info`, async ($, on) => {
     engine(on)
     await $.session.start({ cwd: '/w/shop', surface, isInteractive: true })
     const ui = await $.ui.mount(render(surface))
     expect(await ui.find({ type: 'Text', text: /☼/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^\$0\.00$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^M$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^assisted$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^S$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^ⓘ$/ })).toBeDefined()
     await ui.unmount()
   })
 }
@@ -173,7 +203,7 @@ test('no extend button on a cold cache, which shows its price', async ($, on) =>
   await ui.unmount()
 })
 
-test('the reply size starts at M, a click moves it on, and a typed prompt carries it', async ($, on) => {
+test('the reply size starts at S, a click moves it on, and only a typed prompt carries it', async ($, on) => {
   const seen: (readonly string[] | undefined)[] = []
   engine(on)
   on('prompt.submit', (_: unknown, e: any) => {
@@ -182,14 +212,17 @@ test('the reply size starts at M, a click moves it on, and a typed prompt carrie
   })
   await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount(render('terminal'))
-  expect(await ui.find({ type: 'Text', text: /^M$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^S$/ })).toBeDefined()
   await ui.press({ key: 'size' })
-  expect(await ui.find({ type: 'Text', text: /^L$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Reply size L/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^M$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Reply size M/ })).toBeDefined()
   await $.prompt.submit({ text: 'why?', origin: { kind: 'composer' } })
   await $.prompt.submit({ text: '/clear', origin: { kind: 'composer' } })
-  expect(seen[0]?.at(-1)).toContain('Reply size L')
+  await $.prompt.submit({ text: 'run the turn', origin: { kind: 'sdk' } })
+  expect(seen[0]?.at(-1)).toContain('Reply size M')
+  expect(seen[0]?.at(-1)).toContain('Recommend:')
   expect(seen[1]).toBeUndefined()
+  expect(seen[2]).toBeUndefined()
   await ui.unmount()
 })
 
@@ -210,13 +243,13 @@ test('the sun keeps the Mac awake with caffeinate, and says so', async ($, on) =
   await ui.unmount()
 })
 
-test('a click on the cost says what it counts, and a second click closes it', async ($, on) => {
+test('ⓘ shows the cost, usage and what fills the context, and a second click closes it', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount(render('terminal'))
-  await ui.press({ key: 'cost' })
-  expect(await ui.find({ type: 'Text', text: /This session has spent \$0\.00/ })).toBeDefined()
-  await ui.press({ key: 'cost' })
+  await ui.press({ key: 'info' })
+  expect(await ui.find({ type: 'Text', text: /This session has spent \$0\.00; no usage reading yet\.\nctx: 23k of 200k tokens used \(12%\)\.\nSystem tools 14k/ })).toBeDefined()
+  await ui.press({ key: 'info' })
   expect(await ui.find({ type: 'Text', text: /This session has spent/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -225,8 +258,8 @@ test('a panel closes by itself, and one opened later is not closed early', async
   const clock = engine(on)
   await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount(render('terminal'))
-  await ui.press({ key: 'cost' })
-  expect(await ui.find({ type: 'Text', text: /This session has spent/ })).toBeDefined()
+  await ui.press({ key: 'mode' })
+  expect(await ui.find({ type: 'Text', text: /Manual: no recommendation button/ })).toBeDefined()
   await clock!.advance(4000)
   await ui.press({ key: 'size' })
   await clock!.advance(2000)
@@ -236,14 +269,70 @@ test('a panel closes by itself, and one opened later is not closed early', async
   await ui.unmount()
 })
 
-test('the context shows its tokens from load, and a click breaks them down', async ($, on) => {
+test('under the prompt, the facts follow the hint line, from load', async ($, on) => {
+  const tails: (string | undefined)[] = []
   engine(on)
+  // This hook stands for the engine, which draws its hint with the tail after it.
+  on('ui.render', ($: any, e: any) => {
+    const { Text } = $.ui.resolve(e)
+    tails.push(e.props.tail)
+    return <Text>{`${e.props.hint} ${e.props.tail}`}</Text>
+  })
   await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ plugin: 'canon-band', component: 'PromptHint', surface: 'terminal', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' } } as any)
+  expect(await ui.find({ type: 'Text', text: '? for shortcuts $0.00 · ctx 23k' })).toBeDefined()
+  expect(tails).toEqual(['$0.00 · ctx 23k'])
+  await ui.unmount()
+})
+
+test('a critical command waits for Allow once, then runs once', async ($, on) => {
+  const sent: string[] = []
+  const ran: string[] = []
+  engine(on)
+  on('prompt.submit', (_: unknown, e: any) => {
+    sent.push(e.text)
+    return { text: e.text }
+  })
+  on('tool.call', (_: unknown, e: any) => {
+    ran.push(e.command)
+    return { result: { stdout: '', stderr: '', interrupted: false } }
+  })
+  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
+  const push = { tool: 'Bash', command: 'git push origin main' } as any
+  expect(await $.tool.call(push)).toMatchObject({ deny: expect.stringContaining('a push') })
   const ui = await $.ui.mount(render('terminal'))
-  expect(await ui.find({ type: 'Text', text: /^ctx 23k$/ })).toBeDefined()
-  await ui.press({ key: 'ctx' })
-  expect(await ui.find({ type: 'Text', text: /23k of 200k tokens used \(12%\)\.\nSystem tools 14k/ })).toBeDefined()
-  await ui.press({ key: 'ctx' })
-  expect(await ui.find({ type: 'Text', text: /tokens used/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Claude wants to run a push: git push origin main/ })).toBeDefined()
+  await ui.press({ key: 'allow' })
+  expect(sent).toEqual(['Allowed once: run `git push origin main` again.'])
+  expect(await ui.find({ type: 'Text', text: /Claude wants to run/ })).toBeUndefined()
+  await $.tool.call(push)
+  expect(await $.tool.call(push)).toMatchObject({ deny: expect.any(String) })
+  expect(await $.tool.call({ tool: 'Bash', command: 'git status' } as any)).not.toHaveProperty('deny')
+  expect(ran).toEqual(['git push origin main', 'git status'])
+  await ui.unmount()
+})
+
+test('a headless run is not guarded by the band', async ($, on) => {
+  engine(on)
+  on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
+  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: false })
+  expect(await $.tool.call({ tool: 'Bash', command: 'git push' } as any)).not.toHaveProperty('deny')
+})
+
+test('in assisted mode, a recommendation gets a Go with it button', async ($, on) => {
+  const sent: string[] = []
+  engine(on)
+  on('prompt.submit', (_: unknown, e: any) => {
+    sent.push(e.text)
+    return { text: e.text }
+  })
+  on('turn.complete', (_: unknown, e: any) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
+  await $.turn.complete({ answer: 'Two ways.\nRecommend: rename the repo to canon-band', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' } as any)
+  const ui = await $.ui.mount(render('terminal'))
+  expect(await ui.find({ type: 'Text', text: /Claude recommends: rename the repo to canon-band/ })).toBeDefined()
+  await ui.press({ key: 'go' })
+  expect(sent).toEqual(['Go with your recommendation: rename the repo to canon-band'])
+  expect(await ui.find({ type: 'Text', text: /Claude recommends/ })).toBeUndefined()
   await ui.unmount()
 })

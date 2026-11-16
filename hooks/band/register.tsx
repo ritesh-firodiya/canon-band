@@ -1,10 +1,12 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
-import { cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, money, nextSize, replyRule, windowViews } from './facts'
-import type { CacheFacts, ContextFacts, ContextRow, Info, Level, ReplySize, UsageWindow } from './types'
+import { cacheView, canExtend, coldLabel, contextView, extendLabel, hintTail, infoLine, isTyped, nextMode, nextSize, recommendationOf, replyRule, warningOf, windowViews } from './facts'
+import { commandRisk, readRisk } from './guard'
+import type { Blocked, CacheFacts, ContextFacts, ContextRow, Info, Mode, ReplySize, UsageWindow } from './types'
 
-// The band above the prompt: the session's cost and awake toggle on the left, reply size and what is used on the right.
+// The facts go dim under the prompt, after Claude's own hint; the terminal draws no buttons there.
+// The controls sit in one row above the prompt, beside whatever needs the person: a blocked command, a recommendation, a limit running out.
 // Cache and usage logic follow ribbon (MIT, robonuggets/ribbon).
 
 const TICK_MS = 30_000
@@ -14,17 +16,31 @@ const AMBER = '#f0b429'
 const RED = '#ff7b72'
 const GREEN = '#56d364'
 
-const windows = atom({ plugin: 'canon', key: 'windows' } as const, [] as UsageWindow[])
-const cache = atom({ plugin: 'canon', key: 'cache' } as const, null as CacheFacts | null)
-const taskUsd = atom({ plugin: 'canon', key: 'taskUsd' } as const, 0)
-const panel = atom({ plugin: 'canon', key: 'panel' } as const, null as Info | null)
-const isExtending = atom({ plugin: 'canon', key: 'isExtending' } as const, false)
-const context = atom({ plugin: 'canon', key: 'context' } as const, null as ContextFacts | null)
-const breakdown = atom({ plugin: 'canon', key: 'breakdown' } as const, null as ContextRow[] | null)
-const isAwake = atom({ plugin: 'canon', key: 'isAwake' } as const, false)
-const replySize = atom({ plugin: 'canon', key: 'replySize' } as const, 'M' as ReplySize)
+const windows = atom({ plugin: 'canon-band', key: 'windows' } as const, [] as UsageWindow[])
+const cache = atom({ plugin: 'canon-band', key: 'cache' } as const, null as CacheFacts | null)
+const taskUsd = atom({ plugin: 'canon-band', key: 'taskUsd' } as const, 0)
+const panel = atom({ plugin: 'canon-band', key: 'panel' } as const, null as Info | null)
+const isExtending = atom({ plugin: 'canon-band', key: 'isExtending' } as const, false)
+const context = atom({ plugin: 'canon-band', key: 'context' } as const, null as ContextFacts | null)
+const breakdown = atom({ plugin: 'canon-band', key: 'breakdown' } as const, null as ContextRow[] | null)
+const isAwake = atom({ plugin: 'canon-band', key: 'isAwake' } as const, false)
+const replySize = atom({ plugin: 'canon-band', key: 'replySize' } as const, 'S' as ReplySize)
+const mode = atom({ plugin: 'canon-band', key: 'mode' } as const, 'assisted' as Mode)
+const recommendation = atom({ plugin: 'canon-band', key: 'recommendation' } as const, null as string | null)
+const blocked = atom({ plugin: 'canon-band', key: 'blocked' } as const, null as Blocked | null)
 
-const LEVEL_COLOR: Record<Level, string> = { ok: GREEN, warn: AMBER, bad: RED }
+// Headless runs (Archon, Babul, `claude -p`) have no one to click Allow once; Babul's own hook guards those.
+let isInteractive = false
+// Commands the person allowed, each for one run. Module state, so a reload asks again.
+const allowedOnce = new Set<string>()
+
+/** Refuses a critical operation until the person allows it once on the band. */
+async function guard($: EngineInterface, command: string, what: string | null): Promise<{ deny: string } | null> {
+  if (!what || !isInteractive) return null
+  if (allowedOnce.delete(command)) return null
+  await update($, blocked, () => ({ command, what }))
+  return { deny: `canon-band: this is ${what}, which needs the person's yes. Stop and wait: they can click Allow once above the prompt, and then you run the exact same command again.` }
+}
 
 // The caffeinate child behind ☀; ☼ when there is none. Module state, so a reload, which kills it, starts asleep again.
 // -w ties caffeinate to the process that started it, so a crash or kill -9 of Claude Code cannot leave the Mac awake.
@@ -90,17 +106,18 @@ async function showPanel($: EngineInterface, name: Info | null): Promise<void> {
   const mine = ++shown
   await update($, panel, () => name)
   if (!name) return
-  $.clock.after(name === 'ctx' ? READ_LONG_MS : READ_MS, async () => {
+  $.clock.after(name === 'ctx' || name === 'info' ? READ_LONG_MS : READ_MS, async () => {
     if (shown === mine) await update($, panel, () => null)
   })
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    isInteractive = e.isInteractive
     await setAwake($, false)
     $.clock.every(TICK_MS, async () => $.ui.invalidate('ui.render'))
     const result = await next(e)
-    await refreshContext($).catch(() => undefined)
+    if (isInteractive) await refreshContext($).catch(() => undefined)
     return result
   }).catch(($, e, next) => next(e))
 
@@ -111,6 +128,7 @@ export const register: Register = on => {
       await update($, cache, () => null)
       await update($, context, () => null)
       await update($, breakdown, () => null)
+      await update($, recommendation, () => null)
       if (e.source === 'clear') await update($, panel, () => null)
       await refreshContext($).catch(() => undefined)
     } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
@@ -125,11 +143,17 @@ export const register: Register = on => {
     return result
   }).catch(($, e, next) => next(e))
 
-  // Beside the prompt, not in the system prompt, so a new size keeps the cache.
+  // Beside the prompt, not in the system prompt, so a new size or mode keeps the cache.
   on('prompt.submit', async ($, e, next) => {
-    if (!isTyped(e.text, e.origin.kind === 'plugin')) return next(e)
-    return next({ ...e, context: [...(e.context ?? []), replyRule(await read($, replySize))] })
+    await update($, recommendation, () => null)
+    if (!isTyped(e.text, e.origin.kind)) return next(e)
+    return next({ ...e, context: [...(e.context ?? []), replyRule(await read($, replySize), await read($, mode))] })
   }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => (await guard($, e.command, commandRisk(e.command))) ?? next(e))
+    .catch(($, e, next) => (next.called ? next(e) : { deny: 'canon-band: its guard failed, so the command did not run.' }))
+  on('tool.call', { tool: 'Read' }, async ($, e, next) => (await guard($, e.file_path, readRisk(e.file_path))) ?? next(e))
+    .catch(($, e, next) => (next.called ? next(e) : { deny: 'canon-band: its guard failed, so the file was not read.' }))
 
   on('turn.step', async function* ($, e, next) {
     // Each main request reads or writes the cache, so its start restarts the hour.
@@ -144,8 +168,15 @@ export const register: Register = on => {
     const result = await next(e)
     if (e.agentId) return result
     await update($, isExtending, () => false)
+    if ((await read($, mode)) === 'assisted' && e.reason === 'answer') await update($, recommendation, () => recommendationOf(e.answer))
     await refreshUsage($, await $.clock.now(), e.usage?.model ?? null)
     return result
+  }).catch(($, e, next) => next(e))
+
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const now = await $.clock.now()
+    const tail = hintTail(await read($, taskUsd), windowViews(await read($, windows), now), contextView(await read($, context)))
+    return next({ ...e, props: { ...e.props, tail: e.props.tail ? `${e.props.tail} · ${tail}` : tail } })
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -158,61 +189,72 @@ export const register: Register = on => {
     const extending = await read($, isExtending)
     const view = cacheView(await read($, cache), now)
     const usage = windowViews(await read($, windows), now)
-    const sessionUsd = await read($, taskUsd)
     const ctx = contextView(await read($, context))
-    const rows = await read($, breakdown)
     const awake = await read($, isAwake)
     const size = await read($, replySize)
+    const current = await read($, mode)
+    const pick = await read($, recommendation)
+    const stopped = await read($, blocked)
 
     const toggle = (name: Info) => async () => showPanel($, (await read($, panel)) === name ? null : name)
     // An action says what it did, so a second click acts again instead of closing.
     const say = (name: Info) => showPanel($, name)
-    const showContext = async () => {
-      if ((await read($, panel)) === 'ctx') return showPanel($, null)
+    const showInfo = async () => {
+      if ((await read($, panel)) === 'info') return showPanel($, null)
       await refreshContext($).catch(() => undefined)
-      await say('ctx')
+      await say('info')
     }
     const extend = async () => {
       await update($, isExtending, () => true)
       await say('cache')
       void $.prompt.submit({ text: EXTEND_MESSAGE })
     }
-    const item = (key: Info, label: string, color?: string, onPress: () => unknown = toggle(key)) => (
-      <Button key={key} plain onPress={onPress}><Text color={color} dimColor={!color}>{label}</Text></Button>
+    const answer = async (text: string) => {
+      await update($, recommendation, () => null)
+      void $.prompt.submit({ text })
+    }
+    const allow = async (b: Blocked, isAllowed: boolean) => {
+      await update($, blocked, () => null)
+      if (isAllowed) allowedOnce.add(b.command)
+      void $.prompt.submit({ text: isAllowed ? `Allowed once: run \`${b.command}\` again.` : `Not allowed: do not run \`${b.command}\`. Find another way, or stop and say why.` })
+    }
+    const button = (key: string, label: string, color: string | undefined, onPress: () => unknown) => (
+      <Button key={key} plain onPress={onPress}><Text color={color} dimColor={!color} bold={!!color}>{label}</Text></Button>
     )
 
-    const left = [
+    // What needs the person, most urgent first; one at a time.
+    const warning = warningOf(usage, ctx)
+    const needs = stopped
+      ? [<Text key="ask" color={RED}>{`Claude wants to run ${stopped.what}: ${stopped.command.slice(0, 60)}`}</Text>, button('allow', '[Allow once]', GREEN, () => allow(stopped, true)), button('block', '[Block]', RED, () => allow(stopped, false))]
+      : pick && current === 'assisted' && !e.props.isWorking
+        ? [<Text key="pick">{`Claude recommends: ${pick.slice(0, 70)}`}</Text>, button('go', '[Go with it]', GREEN, () => answer(`Go with your recommendation: ${pick}`)), button('skip', '[Not now]', undefined, async () => update($, recommendation, () => null))]
+        : warning
+          ? [<Text key="warning" color={RED}>{warning}</Text>]
+          : []
+
+    const warm = view?.mode === 'warm' ? view : null
+    const controls = [
       <Button key="awake" plain onPress={async () => { await setAwake($, !awake); await say('awake') }}>
         <Text color={awake ? GREEN : undefined} bold={awake}>{awake ? '☀︎' : '☼'}</Text>
       </Button>,
-      item('cost', money(sessionUsd)),
-    ]
-
-    const warm = view?.mode === 'warm' ? view : null
-    const right = [
-      <Button key="size" plain onPress={async () => { await update($, replySize, nextSize); await say('size') }}><Text color={AMBER} bold>{size}</Text></Button>,
-      ...usage.map(w => item(w.name as Info, w.label, LEVEL_COLOR[w.level])),
-      ctx ? item('ctx', ctx.label, LEVEL_COLOR[ctx.level], showContext) : null,
-      view?.mode === 'cold' ? item('cache', coldLabel(view.nextUsd), AMBER) : null,
+      button('mode', current, current === 'assisted' ? GREEN : undefined, async () => { await update($, mode, nextMode); await say('mode') }),
+      button('size', size, AMBER, async () => { await update($, replySize, nextSize); await say('size') }),
+      button('info', 'ⓘ', undefined, showInfo),
+      view?.mode === 'cold' ? button('cache', coldLabel(view.nextUsd), AMBER, toggle('cache')) : null,
       extending ? <Text key="extending" dimColor>extending...</Text> : null,
-      !extending && warm && canExtend(warm, e.props.isWorking) ? item('cache', extendLabel(warm.minutesLeft, warm.extendUsd), GREEN, extend) : null,
+      !extending && warm && canExtend(warm, e.props.isWorking) ? button('cache', extendLabel(warm.minutesLeft, warm.extendUsd), GREEN, extend) : null,
       !extending && warm && !canExtend(warm, e.props.isWorking) ? <Text key="cache-time" color={GREEN}>{extendLabel(warm.minutesLeft, null)}</Text> : null,
     ]
 
-    const row = (key: string, start: RenderChildren[], end: RenderChildren[]) => (
-      <Box key={key} flexDirection="row" gap={2} width={e.props.bodyColumns}>
-        {start}
-        <Box key="grow" flexGrow={1} />
-        {end}
-      </Box>
-    )
-    const lines = isNarrow(e.props.bodyColumns) ? [row('session', left, []), row('limits', [], right)] : [row('session', left, right)]
-    const line = open ? infoLine(open, { isAwake: awake, size, sessionUsd, windows: usage, context: ctx, breakdown: rows, cache: view }) : ''
-
+    const line = open ? infoLine(open, { isAwake: awake, mode: current, size, sessionUsd: await read($, taskUsd), windows: usage, context: ctx, breakdown: await read($, breakdown), cache: view }) : ''
     const mine = (
       <Box flexDirection="column" width={e.props.bodyColumns}>
-        {lines}
-        {line ? <Text key="info">{line}</Text> : null}
+        <Box key="row" flexDirection="row" gap={2} width={e.props.bodyColumns}>
+          {needs}
+          <Box key="grow" flexGrow={1} />
+          {controls}
+        </Box>
+        {line ? <Text key="info-line">{line}</Text> : null}
       </Box>
     )
     return below ? <Box flexDirection="column">{mine}{below}</Box> : mine

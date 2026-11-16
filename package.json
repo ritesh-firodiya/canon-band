@@ -1,13 +1,13 @@
 {
   "name": "canon-band",
-  "version": "7.1.0",
+  "version": "8.0.0",
   "private": true,
-  "description": "A band above the Claude Code prompt: usage, prompt cache, context, reply size and an awake toggle.",
+  "description": "Usage under the Claude Code prompt, short plain replies, a Go with it button for recommendations, and a yes before anything risky.",
   "license": "MIT",
   "author": "Ritesh Firodiya",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ritesh-firodiya/canon-cli.git"
+    "url": "git+https://github.com/ritesh-firodiya/canon-band.git"
   },
   "packageManager": "pnpm@12.3.4",
   "scripts": {

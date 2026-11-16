@@ -1,18 +1,18 @@
 {
-  "name": "canon",
+  "name": "canon-band",
   "owner": {
     "name": "Ritesh Firodiya"
   },
   "plugins": [
     {
-      "name": "canon",
+      "name": "canon-band",
       "source": "./",
-      "version": "7.1.0",
-      "description": "A band above the prompt: usage used, context in tokens, the prompt cache with a button to extend it, reply size and an awake toggle.",
+      "version": "8.0.0",
+      "description": "Usage under the Claude Code prompt, short plain replies, a Go with it button for recommendations, and a yes before anything risky.",
       "author": {
         "name": "Ritesh Firodiya"
       }
     }
   ],
-  "description": "canon: a band above the Claude Code prompt."
+  "description": "canon-band: usage under the Claude Code prompt, and a yes before anything risky."
 }
