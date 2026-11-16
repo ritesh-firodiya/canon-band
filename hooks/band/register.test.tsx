@@ -89,7 +89,13 @@ test('the context shows the tokens used, coloured by its share of the window', (
 })
 
 test('the breakdown lists what fills the window, largest first, then what is free', () => {
-  expect(breakdownLine(ROWS)).toBe('System tools 14k · Messages 6k · System prompt 3.1k · Free space 144k · Autocompact buffer 33k')
+  expect(breakdownLine(ROWS).split('\n')).toEqual([
+    '  System tools          14k',
+    '  Messages               6k',
+    '  System prompt        3.1k',
+    '  Free space           144k',
+    '  Autocompact buffer    33k',
+  ])
 })
 
 test('reply size goes S, M, L and round, and each size tells the model what to write in plain words', () => {
@@ -141,7 +147,7 @@ test('a click on a short item says what it means in one line', () => {
   expect(infoLine('7D', base)).toBe('7D: 91% of your weekly limit is used. It resets in 3d 9h.')
   expect(infoLine('5H', base)).toBe('5H: no reading yet.')
   expect(infoLine('ctx', base)).toBe('ctx: 80k of 200k tokens used (40%).')
-  expect(infoLine('ctx', { ...base, breakdown: ROWS })).toContain('\nSystem tools 14k · Messages 6k')
+  expect(infoLine('ctx', { ...base, breakdown: ROWS })).toContain('\n  System tools          14k\n  Messages               6k')
   expect(infoLine('mode', base)).toContain('Assisted')
 
 })
@@ -245,7 +251,7 @@ test('a click on ctx breaks the tokens down, and a second click closes it', asyn
   await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount(render('terminal'))
   await ui.press({ key: 'ctx' })
-  expect(await ui.find({ type: 'Text', text: /^ctx: 23k of 200k tokens used \(12%\)\.\nSystem tools 14k · Messages 6k/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ctx: 23k of 200k tokens used \(12%\)\.\n  System tools +14k\n  Messages +6k/ })).toBeDefined()
   await ui.press({ key: 'ctx' })
   expect(await ui.find({ type: 'Text', text: /tokens used/ })).toBeUndefined()
   await ui.unmount()

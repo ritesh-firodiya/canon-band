@@ -74,11 +74,14 @@ export function contextView(facts: ContextFacts | null): ContextView | null {
   return { ...facts, label: `ctx ${tokens(facts.tokens)}`, level: levelOf(facts.percent) }
 }
 
-/** What fills the window, largest first, then what is free: the line a click on ctx shows. */
+/** What fills the window, largest first, then what is free: the lines a click on ctx shows. */
 export function breakdownLine(rows: readonly ContextRow[]): string {
   const used = rows.filter(r => r.kind === 'used' && r.tokens > 0).sort((a, b) => b.tokens - a.tokens)
   const free = rows.filter(r => r.kind === 'free' || r.kind === 'buffer')
-  return [...used, ...free].map(r => `${r.name} ${tokens(r.tokens)}`).join(' · ')
+  const shown = [...used, ...free]
+  const width = Math.max(0, ...shown.map(r => r.name.length))
+  // One row per line, the numbers lined up after the longest name.
+  return shown.map(r => `  ${r.name.padEnd(width)}  ${tokens(r.tokens).padStart(5)}`).join('\n')
 }
 
 export type CacheView =
