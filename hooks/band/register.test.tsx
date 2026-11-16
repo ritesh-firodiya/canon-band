@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextSize, replyRule, windowViews } from './facts'
+import { breakdownLine, cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextSize, replyRule, tokens, windowViews } from './facts'
 import { priceOf } from './prices'
 
 const OPUS = 'claude-opus-5-5'
@@ -9,11 +9,23 @@ const render = (surface: 'terminal' | 'desktop', columns = 140, isWorking = fals
 
 const NOW = Date.parse('2026-11-02T10:00:00Z')
 
+const ROWS = [
+  { name: 'System prompt', tokens: 3_100, kind: 'used' },
+  { name: 'System tools', tokens: 14_200, kind: 'used' },
+  { name: 'Messages', tokens: 6_000, kind: 'used' },
+  { name: 'MCP tools', tokens: 9_000, kind: 'deferred' },
+  { name: 'Free space', tokens: 143_700, kind: 'free' },
+  { name: 'Autocompact buffer', tokens: 33_000, kind: 'buffer' },
+] as const
+const BREAKDOWN = { categories: ROWS.map(r => ({ ...r, color: 'inactive', isDeferred: r.kind === 'deferred' })), totalTokens: 23_300, maxTokens: 200_000, rawMaxTokens: 200_000, percentage: 12 }
+
 function engine(on: any, frozen = false) {
   on('env.get', () => ({ value: undefined }))
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/w/shop' }))
   on('session.model', () => ({ value: OPUS }))
+  // Before the first reply: no live reading, only the local estimate.
+  on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { window: 200_000, breakdown: BREAKDOWN } } }))
   mock.store(on)
   if (!frozen) return mock.clock(on)
   on('clock.now', () => ({ value: NOW }))
@@ -52,7 +64,7 @@ test('extend shows only on a warm cache with no reply running', () => {
   expect(canExtend(null, false)).toBe(false)
 })
 
-test('usage shows what is left, red under 20% with the reset only then, amber under 40%', () => {
+test('usage shows what is used, rising from 0: red from 80% with the reset only then, amber from 60%', () => {
   const now = Date.parse('2026-11-02T00:00:00Z')
   const views = windowViews(
     [
@@ -63,15 +75,20 @@ test('usage shows what is left, red under 20% with the reset only then, amber un
     now,
   )
   expect(views).toEqual([
-    { name: '7D', left: 9, reset: '3d 9h', label: '7D 9% 3d 9h', level: 'bad' },
-    { name: '5H', left: 35, reset: null, label: '5H 35%', level: 'warn' },
+    { name: '7D', used: 91, reset: '3d 9h', label: '7D 91% 3d 9h', level: 'bad' },
+    { name: '5H', used: 65, reset: null, label: '5H 65%', level: 'warn' },
   ])
 })
 
-test('the context shows the room left, and nothing before the first reading', () => {
-  expect(contextView(38.4)).toMatchObject({ label: 'ctx 62%', level: 'ok' })
-  expect(contextView(88)).toMatchObject({ label: 'ctx 12%', level: 'bad' })
+test('the context shows the tokens used, coloured by its share of the window', () => {
+  expect(contextView({ tokens: 23_300, window: 200_000, percent: 12 })).toMatchObject({ label: 'ctx 23k', level: 'ok' })
+  expect(contextView({ tokens: 176_000, window: 200_000, percent: 88 })).toMatchObject({ label: 'ctx 176k', level: 'bad' })
   expect(contextView(null)).toBeNull()
+  expect([tokens(850), tokens(8_400), tokens(23_300), tokens(1_000_000), tokens(1_250_000)]).toEqual(['850', '8.4k', '23k', '1M', '1.3M'])
+})
+
+test('the breakdown lists what fills the window, largest first, then what is free', () => {
+  expect(breakdownLine(ROWS)).toBe('System tools 14k · Messages 6k · System prompt 3.1k · Free space 144k · Autocompact buffer 33k')
 })
 
 test('reply size goes S, M, L and round, and each size tells the model what to write', () => {
@@ -88,14 +105,15 @@ test('slash commands and messages from a mod do not carry the reply size', () =>
 })
 
 test('a click on a short item says what it means in one line', () => {
-  const base = { isAwake: false, size: 'M' as const, sessionUsd: 1.2, windows: windowViews([{ kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T09:00:00Z' }], Date.parse('2026-11-02T00:00:00Z')), context: contextView(40), cache: null }
+  const base = { isAwake: false, size: 'M' as const, sessionUsd: 1.2, windows: windowViews([{ kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T09:00:00Z' }], Date.parse('2026-11-02T00:00:00Z')), context: contextView({ tokens: 80_000, window: 200_000, percent: 40 }), breakdown: null, cache: null }
   expect(infoLine('awake', base)).toContain('not keeping the Mac awake')
   expect(infoLine('awake', { ...base, isAwake: true })).toContain('will not sleep')
   expect(infoLine('size', base)).toContain('short bullet list')
   expect(infoLine('cost', base)).toBe('This session has spent $1.20.')
-  expect(infoLine('7D', base)).toBe('7D: 9% of your weekly limit is left. It resets in 3d 9h.')
+  expect(infoLine('7D', base)).toBe('7D: 91% of your weekly limit is used. It resets in 3d 9h.')
   expect(infoLine('5H', base)).toBe('5H: no reading yet.')
-  expect(infoLine('ctx', base)).toContain('60% of the context window is left')
+  expect(infoLine('ctx', base)).toBe('ctx: 80k of 200k tokens used (40%).')
+  expect(infoLine('ctx', { ...base, breakdown: ROWS })).toContain('\nSystem tools 14k · Messages 6k')
 })
 
 test('a narrow terminal uses two rows', () => {
@@ -215,5 +233,17 @@ test('a panel closes by itself, and one opened later is not closed early', async
   expect(await ui.find({ type: 'Text', text: /Reply size/ })).toBeDefined()
   await clock!.advance(4000)
   expect(await ui.find({ type: 'Text', text: /Reply size/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the context shows its tokens from load, and a click breaks them down', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(render('terminal'))
+  expect(await ui.find({ type: 'Text', text: /^ctx 23k$/ })).toBeDefined()
+  await ui.press({ key: 'ctx' })
+  expect(await ui.find({ type: 'Text', text: /23k of 200k tokens used \(12%\)\.\nSystem tools 14k/ })).toBeDefined()
+  await ui.press({ key: 'ctx' })
+  expect(await ui.find({ type: 'Text', text: /tokens used/ })).toBeUndefined()
   await ui.unmount()
 })

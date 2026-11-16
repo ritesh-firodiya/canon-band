@@ -1,6 +1,6 @@
 {
   "name": "canon-band",
-  "version": "7.0.0",
+  "version": "7.1.0",
   "private": true,
   "description": "A band above the Claude Code prompt: usage, prompt cache, context, reply size and an awake toggle.",
   "license": "MIT",

@@ -1,5 +1,12 @@
 # Changelog
 
+## 7.1.0 — 2026-11-16
+
+### Changed
+
+- **Usage counts up.** 7D and 5H show the share used, from 0%: amber from 60%, red from 80% with the reset time.
+- **Context in tokens, from load.** ctx shows the tokens in the window (`ctx 23k`) before the first reply, from Claude Code's local estimate. A click shows what fills it, largest first, then what is free.
+
 ## 7.0.0 — 2026-11-16
 
 ### Changed

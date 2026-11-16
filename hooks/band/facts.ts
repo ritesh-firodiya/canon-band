@@ -1,11 +1,11 @@
 // Pure helpers for the band: no `$`, so the tests call them directly.
 
 import { priceOf } from './prices'
-import type { CacheFacts, Info, Level, ReplySize, UsageWindow } from './types'
+import type { CacheFacts, ContextFacts, ContextRow, Info, Level, ReplySize, UsageWindow } from './types'
 
 export const TTL_MS = 60 * 60 * 1000
-const LOW_AT = 20
-const WARN_AT = 40
+const HIGH_AT = 80
+const WARN_AT = 60
 const PER_MILLION = 1_000_000
 const NARROW_BELOW = 110
 
@@ -25,31 +25,60 @@ export function duration(ms: number): string {
 
 export interface WindowView {
   name: string
-  left: number
-  /** Only when it is low, since that is when it matters. */
+  used: number
+  /** Only when it is high, since that is when it matters. */
   reset: string | null
   label: string
   level: Level
 }
 
-/** How much is left decides the colour: red when it is about to run out. */
-export const levelOf = (left: number): Level => (left < LOW_AT ? 'bad' : left < WARN_AT ? 'warn' : 'ok')
+/** How much is used decides the colour: red when it is about to run out. */
+export const levelOf = (used: number): Level => (used >= HIGH_AT ? 'bad' : used >= WARN_AT ? 'warn' : 'ok')
 
 const NAMES: Record<string, string> = { seven_day: '7D', five_hour: '5H' }
 const ORDER: Record<string, number> = { seven_day: 0, five_hour: 1 }
 
-/** Usage left: the reset time only when it is low, since that is when it matters. */
+/** Usage so far, rising from 0: the reset time only when it is high, since that is when it matters. */
 export function windowViews(windows: readonly UsageWindow[], now: number): WindowView[] {
   return [...windows]
     .filter(w => NAMES[w.kind])
     .sort((a, b) => (ORDER[a.kind] ?? 9) - (ORDER[b.kind] ?? 9))
     .map(w => {
-      const left = Math.max(0, Math.round(100 - w.percentUsed))
-      const level = levelOf(left)
+      const used = Math.min(100, Math.max(0, Math.round(w.percentUsed)))
+      const level = levelOf(used)
       const name = NAMES[w.kind] as string
       const reset = level === 'bad' && w.resetsAt ? duration(Date.parse(w.resetsAt) - now) : null
-      return { name, left, reset, label: `${name} ${left}%${reset ? ` ${reset}` : ''}`, level }
+      return { name, used, reset, label: `${name} ${used}%${reset ? ` ${reset}` : ''}`, level }
     })
+}
+
+/** 850, 8.4k, 23k, 1.2M: short enough for the band. */
+export function tokens(n: number): string {
+  if (n < 1000) return `${Math.round(n)}`
+  if (n < 10_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+}
+
+export interface ContextView {
+  tokens: number
+  window: number
+  percent: number
+  label: string
+  level: Level
+}
+
+/** Tokens in the context window, from the session's load on; null before any reading. */
+export function contextView(facts: ContextFacts | null): ContextView | null {
+  if (!facts) return null
+  return { ...facts, label: `ctx ${tokens(facts.tokens)}`, level: levelOf(facts.percent) }
+}
+
+/** What fills the window, largest first, then what is free: the line a click on ctx shows. */
+export function breakdownLine(rows: readonly ContextRow[]): string {
+  const used = rows.filter(r => r.kind === 'used' && r.tokens > 0).sort((a, b) => b.tokens - a.tokens)
+  const free = rows.filter(r => r.kind === 'free' || r.kind === 'buffer')
+  return [...used, ...free].map(r => `${r.name} ${tokens(r.tokens)}`).join(' · ')
 }
 
 export type CacheView =
@@ -63,13 +92,6 @@ export function cacheView(cache: CacheFacts | null, now: number): CacheView | nu
   const price = cache.model ? priceOf(cache.model, cache.tokens) : null
   if (idle >= TTL_MS) return { mode: 'cold', nextUsd: price ? (cache.tokens * price.write1h) / PER_MILLION : null }
   return { mode: 'warm', minutesLeft: Math.ceil((TTL_MS - idle) / 60000), extendUsd: price ? (cache.tokens * price.cacheRead) / PER_MILLION : null }
-}
-
-/** Room left in the context window, from the share the engine says is used. */
-export function contextView(percentUsed: number | null): WindowView | null {
-  if (percentUsed === null) return null
-  const left = Math.max(0, 100 - Math.round(percentUsed))
-  return { name: 'ctx', left, reset: null, label: `ctx ${left}%`, level: levelOf(left) }
 }
 
 const about = (usd: number): string => `${usd < CENT ? '' : '~'}${round(usd)}`
@@ -99,7 +121,8 @@ export interface InfoFacts {
   size: ReplySize
   sessionUsd: number
   windows: readonly WindowView[]
-  context: WindowView | null
+  context: ContextView | null
+  breakdown: readonly ContextRow[] | null
   cache: CacheView | null
 }
 
@@ -107,14 +130,18 @@ export interface InfoFacts {
 export function infoLine(info: Info, f: InfoFacts): string {
   const limit = (name: string, what: string) => {
     const w = f.windows.find(entry => entry.name === name)
-    return w ? `${name}: ${w.left}% of your ${what} limit is left.${w.reset ? ` It resets in ${w.reset}.` : ''}` : `${name}: no reading yet.`
+    return w ? `${name}: ${w.used}% of your ${what} limit is used.${w.reset ? ` It resets in ${w.reset}.` : ''}` : `${name}: no reading yet.`
   }
   if (info === 'awake') return f.isAwake ? '☀ Awake: this Mac will not sleep while this session is open. Click again to let it sleep.' : '☼ This session is not keeping the Mac awake. Click to keep it awake while this session is open.'
   if (info === 'size') return `Reply size ${f.size}: ${SIZE_WORDS[f.size]}. Click again for the next size.`
   if (info === 'cost') return `This session has spent ${money(f.sessionUsd)}.`
   if (info === '7D') return limit('7D', 'weekly')
   if (info === '5H') return limit('5H', 'five-hour')
-  if (info === 'ctx') return f.context ? `ctx: ${f.context.left}% of the context window is left. Under ${LOW_AT}%, compact or start a new session.` : 'ctx: no reading yet.'
+  if (info === 'ctx') {
+    if (!f.context) return 'ctx: no reading yet.'
+    const head = `ctx: ${tokens(f.context.tokens)} of ${tokens(f.context.window)} tokens used (${f.context.percent}%).${f.context.percent >= HIGH_AT ? ' Compact or start a new session.' : ''}`
+    return f.breakdown?.length ? `${head}\n${breakdownLine(f.breakdown)}` : head
+  }
   if (f.cache?.mode === 'cold') return `◌ Cache is cold: the next reply reads the whole chat again${f.cache.nextUsd === null ? '' : `, about ${round(f.cache.nextUsd)}`}.`
   if (f.cache?.mode === 'warm') return `↻ Cache warm for ${f.cache.minutesLeft} more minutes.${f.cache.extendUsd === null ? '' : ` A click keeps it warm for an hour, for ${round(f.cache.extendUsd)}.`}`
   return ''

@@ -4,6 +4,10 @@ export type ReplySize = 'S' | 'M' | 'L'
 
 export type CacheFacts = { lastAt: number; tokens: number; model: string | null }
 
+export type ContextFacts = { tokens: number; window: number; percent: number }
+
+export type ContextRow = { name: string; tokens: number; kind: 'used' | 'free' | 'buffer' | 'deferred' }
+
 export type UsageWindow = { kind: string; percentUsed: number; resetsAt?: string }
 
 declare module 'claude-code' {
@@ -14,7 +18,8 @@ declare module 'claude-code' {
       taskUsd: number
       panel: Info | null
       isExtending: boolean
-      contextUsed: number | null
+      context: ContextFacts | null
+      breakdown: ContextRow[] | null
       isAwake: boolean
       replySize: ReplySize
     }

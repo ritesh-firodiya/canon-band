@@ -2,9 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import { cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, money, nextSize, replyRule, windowViews } from './facts'
-import type { CacheFacts, Info, Level, ReplySize, UsageWindow } from './types'
+import type { CacheFacts, ContextFacts, ContextRow, Info, Level, ReplySize, UsageWindow } from './types'
 
-// The band above the prompt: the session's cost and awake toggle on the left, reply size and what is left on the right.
+// The band above the prompt: the session's cost and awake toggle on the left, reply size and what is used on the right.
 // Cache and usage logic follow ribbon (MIT, robonuggets/ribbon).
 
 const TICK_MS = 30_000
@@ -19,7 +19,8 @@ const cache = atom({ plugin: 'canon', key: 'cache' } as const, null as CacheFact
 const taskUsd = atom({ plugin: 'canon', key: 'taskUsd' } as const, 0)
 const panel = atom({ plugin: 'canon', key: 'panel' } as const, null as Info | null)
 const isExtending = atom({ plugin: 'canon', key: 'isExtending' } as const, false)
-const contextUsed = atom({ plugin: 'canon', key: 'contextUsed' } as const, null as number | null)
+const context = atom({ plugin: 'canon', key: 'context' } as const, null as ContextFacts | null)
+const breakdown = atom({ plugin: 'canon', key: 'breakdown' } as const, null as ContextRow[] | null)
 const isAwake = atom({ plugin: 'canon', key: 'isAwake' } as const, false)
 const replySize = atom({ plugin: 'canon', key: 'replySize' } as const, 'M' as ReplySize)
 
@@ -60,7 +61,8 @@ async function refreshUsage($: EngineInterface, lastAt: number | null, model: st
   const usage = await $.session.usage()
   await update($, windows, () => usage.rateLimits.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: w.resetsAt })))
   await update($, taskUsd, value => usage.cost?.usd ?? value)
-  await update($, contextUsed, value => usage.context.percent ?? value)
+  const { tokens: used, percent, window } = usage.context
+  if (used !== undefined && percent !== undefined) await update($, context, () => ({ tokens: used, window, percent }))
   const known = model ?? (await $.session.model())
   await update($, cache, c => ({
     lastAt: lastAt ?? c?.lastAt ?? 0,
@@ -69,7 +71,18 @@ async function refreshUsage($: EngineInterface, lastAt: number | null, model: st
   }))
 }
 
+/** The window and what fills it. Before the first reply the engine has no reading, so its local estimate stands in; it sends nothing. */
+async function refreshContext($: EngineInterface): Promise<void> {
+  const { context: live } = await $.session.usage({ breakdown: 'summary' })
+  const b = live.breakdown
+  if (b) await update($, breakdown, () => b.categories.map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind })))
+  if (live.tokens !== undefined && live.percent !== undefined) await update($, context, () => ({ tokens: live.tokens as number, window: live.window, percent: live.percent as number }))
+  else if (b) await update($, context, () => ({ tokens: b.totalTokens, window: b.rawMaxTokens, percent: b.percentage }))
+}
+
 const READ_MS = 5000
+// The breakdown is a longer line, so it stays up longer.
+const READ_LONG_MS = 12_000
 let shown = 0
 
 /** Opens a panel, or closes it with null. It closes after time to read it, unless another opened since. */
@@ -77,7 +90,7 @@ async function showPanel($: EngineInterface, name: Info | null): Promise<void> {
   const mine = ++shown
   await update($, panel, () => name)
   if (!name) return
-  $.clock.after(READ_MS, async () => {
+  $.clock.after(name === 'ctx' ? READ_LONG_MS : READ_MS, async () => {
     if (shown === mine) await update($, panel, () => null)
   })
 }
@@ -86,7 +99,9 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await setAwake($, false)
     $.clock.every(TICK_MS, async () => $.ui.invalidate('ui.render'))
-    return next(e)
+    const result = await next(e)
+    await refreshContext($).catch(() => undefined)
+    return result
   }).catch(($, e, next) => next(e))
 
   // A resumed session knows how long it was away; a cleared one starts over.
@@ -94,8 +109,10 @@ export const register: Register = on => {
     const result = await next(e)
     if (e.source === 'clear' || e.source === 'compact') {
       await update($, cache, () => null)
-      await update($, contextUsed, () => null)
+      await update($, context, () => null)
+      await update($, breakdown, () => null)
       if (e.source === 'clear') await update($, panel, () => null)
+      await refreshContext($).catch(() => undefined)
     } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
       const now = await $.clock.now()
       const seconds = e.seconds_since_last_response
@@ -142,13 +159,19 @@ export const register: Register = on => {
     const view = cacheView(await read($, cache), now)
     const usage = windowViews(await read($, windows), now)
     const sessionUsd = await read($, taskUsd)
-    const context = contextView(await read($, contextUsed))
+    const ctx = contextView(await read($, context))
+    const rows = await read($, breakdown)
     const awake = await read($, isAwake)
     const size = await read($, replySize)
 
     const toggle = (name: Info) => async () => showPanel($, (await read($, panel)) === name ? null : name)
     // An action says what it did, so a second click acts again instead of closing.
     const say = (name: Info) => showPanel($, name)
+    const showContext = async () => {
+      if ((await read($, panel)) === 'ctx') return showPanel($, null)
+      await refreshContext($).catch(() => undefined)
+      await say('ctx')
+    }
     const extend = async () => {
       await update($, isExtending, () => true)
       await say('cache')
@@ -169,7 +192,7 @@ export const register: Register = on => {
     const right = [
       <Button key="size" plain onPress={async () => { await update($, replySize, nextSize); await say('size') }}><Text color={AMBER} bold>{size}</Text></Button>,
       ...usage.map(w => item(w.name as Info, w.label, LEVEL_COLOR[w.level])),
-      context ? item('ctx', context.label, LEVEL_COLOR[context.level]) : null,
+      ctx ? item('ctx', ctx.label, LEVEL_COLOR[ctx.level], showContext) : null,
       view?.mode === 'cold' ? item('cache', coldLabel(view.nextUsd), AMBER) : null,
       extending ? <Text key="extending" dimColor>extending...</Text> : null,
       !extending && warm && canExtend(warm, e.props.isWorking) ? item('cache', extendLabel(warm.minutesLeft, warm.extendUsd), GREEN, extend) : null,
@@ -183,12 +206,12 @@ export const register: Register = on => {
         {end}
       </Box>
     )
-    const rows = isNarrow(e.props.bodyColumns) ? [row('session', left, []), row('limits', [], right)] : [row('session', left, right)]
-    const line = open ? infoLine(open, { isAwake: awake, size, sessionUsd, windows: usage, context, cache: view }) : ''
+    const lines = isNarrow(e.props.bodyColumns) ? [row('session', left, []), row('limits', [], right)] : [row('session', left, right)]
+    const line = open ? infoLine(open, { isAwake: awake, size, sessionUsd, windows: usage, context: ctx, breakdown: rows, cache: view }) : ''
 
     const mine = (
       <Box flexDirection="column" width={e.props.bodyColumns}>
-        {rows}
+        {lines}
         {line ? <Text key="info">{line}</Text> : null}
       </Box>
     )
