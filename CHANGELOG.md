@@ -6,7 +6,7 @@
 
 - **Renamed to canon-band.** Install it with `claude plugin install canon-band@canon-band` from `ritesh-firodiya/canon-band`, after `claude plugin uninstall canon@canon`.
 - **What needs you gets its own row** above the band: a blocked command, or a recommendation to go with.
-- **Usage counts up.** 7D and 5H show the share used, from 0%: amber from 60%, red from 80% with the reset time.
+- **Usage counts up, led by the time left.** Each limit shows the time until it resets and the share used, from 0%: `3d 59%` for the weekly limit, `2h 4%` for the 5-hour one. Amber from 60%, red from 80%.
 - **Context in tokens, from load.** ctx shows the tokens in the window (`ctx 23k`) before the first reply, from Claude Code's local estimate. A click shows what fills it, largest first, then what is free.
 - **Short, plain replies.** The reply size starts at S, and every size asks for plain words, the way a person talks. Only prompts the person types carry it: SDK runs, schedules and other agents do not.
 

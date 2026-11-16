@@ -23,10 +23,19 @@ export function duration(ms: number): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
+/** The time left, in its biggest unit: 3d, 20h, 45m. */
+export function timeLeft(ms: number): string {
+  const minutes = Math.max(0, Math.floor(ms / 60000))
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`
+}
+
 export interface WindowView {
+  /** Which window: 7D or 5H, the key a click shows. */
   name: string
   used: number
-  /** Only when it is high, since that is when it matters. */
+  /** When it resets, in full; null before the engine says. */
   reset: string | null
   label: string
   level: Level
@@ -38,7 +47,7 @@ export const levelOf = (used: number): Level => (used >= HIGH_AT ? 'bad' : used 
 const NAMES: Record<string, string> = { seven_day: '7D', five_hour: '5H' }
 const ORDER: Record<string, number> = { seven_day: 0, five_hour: 1 }
 
-/** Usage so far, rising from 0: the reset time only when it is high, since that is when it matters. */
+/** Usage so far, rising from 0, led by the time left until the window resets: `3d 59%`, `2h 4%`. */
 export function windowViews(windows: readonly UsageWindow[], now: number): WindowView[] {
   return [...windows]
     .filter(w => NAMES[w.kind])
@@ -47,8 +56,9 @@ export function windowViews(windows: readonly UsageWindow[], now: number): Windo
       const used = Math.min(100, Math.max(0, Math.round(w.percentUsed)))
       const level = levelOf(used)
       const name = NAMES[w.kind] as string
-      const reset = level === 'bad' && w.resetsAt ? duration(Date.parse(w.resetsAt) - now) : null
-      return { name, used, reset, label: `${name} ${used}%${reset ? ` ${reset}` : ''}`, level }
+      const ms = w.resetsAt ? Date.parse(w.resetsAt) - now : Number.NaN
+      const known = Number.isFinite(ms)
+      return { name, used, reset: known ? duration(ms) : null, label: `${known ? timeLeft(ms) : name} ${used}%`, level }
     })
 }
 
@@ -154,14 +164,14 @@ export interface InfoFacts {
 export function infoLine(info: Info, f: InfoFacts): string {
   const limit = (name: string, what: string) => {
     const w = f.windows.find(entry => entry.name === name)
-    return w ? `${name}: ${w.used}% of your ${what} limit is used.${w.reset ? ` It resets in ${w.reset}.` : ''}` : `${name}: no reading yet.`
+    return w ? `${what}: ${w.used}% used.${w.reset ? ` It resets in ${w.reset}.` : ''}` : `${what}: no reading yet.`
   }
   if (info === 'awake') return f.isAwake ? '☀ Awake: this Mac will not sleep while this session is open. Click again to let it sleep.' : '☼ This session is not keeping the Mac awake. Click to keep it awake while this session is open.'
   if (info === 'size') return `Reply size ${f.size}: ${SIZE_WORDS[f.size]}. Click again for the next size.`
   if (info === 'mode') return f.mode === 'assisted' ? 'Assisted: when Claude recommends something, a Go with it button sends it on. Click for manual.' : 'Manual: no recommendation button. Click for assisted.'
   if (info === 'cost') return `This session has spent ${money(f.sessionUsd)}.`
-  if (info === '7D') return limit('7D', 'weekly')
-  if (info === '5H') return limit('5H', 'five-hour')
+  if (info === '7D') return limit('7D', 'Weekly limit')
+  if (info === '5H') return limit('5H', '5-hour limit')
   if (info === 'ctx') {
     if (!f.context) return 'ctx: no reading yet.'
     const head = `ctx: ${tokens(f.context.tokens)} of ${tokens(f.context.window)} tokens used (${f.context.percent}%).${f.context.percent >= HIGH_AT ? ' Compact or start a new session.' : ''}`

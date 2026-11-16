@@ -11,7 +11,7 @@ server. The only thing it sends is a short note beside each prompt you type,
 about 75 tokens, with your reply size and mode.
 
 ```
-☼  $1.20  assisted  S                     7D 59%  5H 4%  ctx 23k  ↻ 53m +$0.17
+☼  $1.20  assisted  S                     3d 59%  2h 4%  ctx 23k  ↻ 53m +$0.17
 ╭──────────────────────────────────────────────────────────────────────────╮
 │ > your prompt                                                            │
 ╰──────────────────────────────────────────────────────────────────────────╯
@@ -24,7 +24,7 @@ what it means in one line, which closes by itself.
 - **Cost:** what this session has spent.
 - **Mode:** `assisted` (the default) or `manual`. In assisted, Claude ends a choice with a `Recommend:` line, and a **Go with it** button sends it on. Manual adds no button.
 - **Reply size:** S (the default), M or L. S is one to three short lines, M the answer and a short list, L the answer with steps and trade-offs. Every size asks for plain words, the way a person talks.
-- **7D and 5H:** how much of your 7-day and 5-hour limits you have used, from 0%. Amber from 60%, red from 80% with the reset time. Shown on a Claude plan, once the first reply comes back.
+- **Weekly and 5-hour limits:** `3d 59%` is 3 days until the weekly limit resets, with 59% of it used; `2h 4%` the same for the 5-hour limit. Usage counts up from 0%: amber from 60%, red from 80%. A click gives the exact reset time. Shown on a Claude plan, once the first reply comes back.
 - **ctx:** the tokens in the context window, from the moment the session loads (Claude Code's own estimate, then each reply). A click shows what fills it, largest first: system prompt, tools, memory, messages, then what is free.
 - **Prompt cache:** `↻ 53m` is how long it stays warm. A click keeps it warm for another hour, and the label shows that cost first. Once cold, `◌ cold ~$8.00` is what your next message costs.
 

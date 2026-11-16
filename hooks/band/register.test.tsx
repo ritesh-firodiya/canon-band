@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { breakdownLine, cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextMode, nextSize, recommendationOf, replyRule, tokens, windowViews } from './facts'
+import { breakdownLine, cacheView, timeLeft, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextMode, nextSize, recommendationOf, replyRule, tokens, windowViews } from './facts'
 import { commandRisk, readRisk } from './guard'
 import { priceOf } from './prices'
 
@@ -65,20 +65,22 @@ test('extend shows only on a warm cache with no reply running', () => {
   expect(canExtend(null, false)).toBe(false)
 })
 
-test('usage shows what is used, rising from 0: red from 80% with the reset only then, amber from 60%', () => {
+test('usage shows the time left until it resets and what is used, from 0: amber from 60%, red from 80%', () => {
   const now = Date.parse('2026-11-02T00:00:00Z')
   const views = windowViews(
     [
-      { kind: 'five_hour', percentUsed: 65 },
+      { kind: 'five_hour', percentUsed: 65, resetsAt: '2026-11-02T02:10:00Z' },
       { kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T09:00:00Z' },
       { kind: 'other', percentUsed: 1 },
     ],
     now,
   )
   expect(views).toEqual([
-    { name: '7D', used: 91, reset: '3d 9h', label: '7D 91% 3d 9h', level: 'bad' },
-    { name: '5H', used: 65, reset: null, label: '5H 65%', level: 'warn' },
+    { name: '7D', used: 91, reset: '3d 9h', label: '3d 91%', level: 'bad' },
+    { name: '5H', used: 65, reset: '2h 10m', label: '2h 65%', level: 'warn' },
   ])
+  expect(windowViews([{ kind: 'five_hour', percentUsed: 4 }], now)[0]?.label).toBe('5H 4%')
+  expect([timeLeft(45 * 60000), timeLeft(20 * 3600000), timeLeft(6.5 * 86400000)]).toEqual(['45m', '20h', '6d'])
 })
 
 test('the context shows the tokens used, coloured by its share of the window', () => {
@@ -144,8 +146,8 @@ test('a click on a short item says what it means in one line', () => {
   expect(infoLine('awake', { ...base, isAwake: true })).toContain('will not sleep')
   expect(infoLine('size', base)).toContain('short bullet list')
   expect(infoLine('cost', base)).toBe('This session has spent $1.20.')
-  expect(infoLine('7D', base)).toBe('7D: 91% of your weekly limit is used. It resets in 3d 9h.')
-  expect(infoLine('5H', base)).toBe('5H: no reading yet.')
+  expect(infoLine('7D', base)).toBe('Weekly limit: 91% used. It resets in 3d 9h.')
+  expect(infoLine('5H', base)).toBe('5-hour limit: no reading yet.')
   expect(infoLine('ctx', base)).toBe('ctx: 80k of 200k tokens used (40%).')
   expect(infoLine('ctx', { ...base, breakdown: ROWS })).toContain('\n  System tools          14k\n  Messages               6k')
   expect(infoLine('mode', base)).toContain('Assisted')
