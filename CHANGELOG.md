@@ -1,5 +1,11 @@
 # Changelog
 
+## 7.0.0 — 2026-11-16
+
+### Changed
+
+- **The band only.** Process, knowledge, routing, the checks, standards, packs and the design shell moved to Babul (github.com/babulhq/babul). The `canon-process` and `canon-knowledge` plugins, the `canon` CLI and the npm package are gone from this repo. The band prices the cache from the public list price.
+
 ## 6.7.0 — 2026-11-07
 
 ### Fixed

@@ -1,27 +1,13 @@
 // Pure helpers for the band: no `$`, so the tests call them directly.
 
-import { priceOf, type Price } from '../../cli/src/setup/models/prices'
-import type { BandFacts, CacheFacts, Info, Level, Panel, ReplySize, Tests, UsageWindow } from './types'
+import { priceOf } from './prices'
+import type { CacheFacts, Info, Level, ReplySize, UsageWindow } from './types'
 
 export const TTL_MS = 60 * 60 * 1000
 const LOW_AT = 20
 const WARN_AT = 40
 const PER_MILLION = 1_000_000
 const NARROW_BELOW = 110
-
-// The test runners ponytail's band knows (MIT, DietrichGebert/ponytail).
-const TEST_COMMAND = /\b(npm (run )?test|pnpm (run )?test|yarn test|bun test|npx (jest|vitest)|jest|vitest|pytest|python3? -m pytest|go test|cargo test|mvn test|gradle test|rspec|phpunit|dotnet test|node --test|deno test|make test)\b/
-const CODE_FILE = /\.(py|[cm]?[jt]sx?|go|rs|rb)$/
-
-export const isTestCommand = (command: string): boolean => TEST_COMMAND.test(command)
-export const isCodeFile = (file: string): boolean => CODE_FILE.test(file)
-
-export const afterTestRun = (failed: boolean): Tests => (failed ? 'failed' : 'ok')
-// Code changed after a run: its result no longer says anything.
-export const afterEdit = (tests: Tests, file: string): Tests => (tests !== 'none' && isCodeFile(file) ? 'stale' : tests)
-
-const TESTS: Record<Tests, string> = { none: '', ok: '✓ tests', stale: '~ tests', failed: '✗ tests' }
-export const testsLabel = (tests: Tests): string => TESTS[tests]
 
 export const money = (usd: number): string => `$${usd.toFixed(2)}`
 const CENT = 0.01
@@ -70,17 +56,11 @@ export type CacheView =
   | { mode: 'warm'; minutesLeft: number; extendUsd: number | null }
   | { mode: 'cold'; nextUsd: number | null }
 
-type Prices = Record<string, Price>
-
-/** The machine's price from `canon band` (config, or what a family name runs there), else the public list price. */
-// shortcut: `canon band` prices at a short prompt, so a long Haiku 5.5 prompt there misses its higher rate; pass the prompt size if Haiku runs long chats.
-const rateOf = (model: string, tokens: number, prices?: Prices): Price | null => prices?.[model] ?? priceOf(model, tokens)
-
 /** Warm for an hour after the last request. Null before there is anything cached. */
-export function cacheView(cache: CacheFacts | null, now: number, prices?: Prices): CacheView | null {
+export function cacheView(cache: CacheFacts | null, now: number): CacheView | null {
   if (!cache || cache.lastAt <= 0 || cache.tokens <= 0) return null
   const idle = Math.max(0, now - cache.lastAt)
-  const price = cache.model ? rateOf(cache.model, cache.tokens, prices) : null
+  const price = cache.model ? priceOf(cache.model, cache.tokens) : null
   if (idle >= TTL_MS) return { mode: 'cold', nextUsd: price ? (cache.tokens * price.write1h) / PER_MILLION : null }
   return { mode: 'warm', minutesLeft: Math.ceil((TTL_MS - idle) / 60000), extendUsd: price ? (cache.tokens * price.cacheRead) / PER_MILLION : null }
 }
@@ -99,21 +79,6 @@ export const coldLabel = (usd: number | null): string => (usd === null ? '◌ co
 /** Extend shows only when it can do something: the cache is warm and no reply is running. */
 export const canExtend = (view: CacheView | null, isBusy: boolean): boolean => view?.mode === 'warm' && !isBusy
 
-/** What a click folds open under the band. Each line is plain text. */
-export function panelLines(panel: Panel, facts: BandFacts): string[] {
-  const where = (f: { file?: string; message: string }, level: string) => `${level}  ${f.file ? `${f.file}  ` : ''}${f.message}`
-  if (panel === 'errors') return facts.errors.map(f => where(f, 'error'))
-  if (panel === 'warnings') return facts.warnings.map(f => where(f, 'warning'))
-  if (panel === 'review') {
-    if (!facts.waiting) return []
-    return [
-      `Review ${facts.problem?.file ?? facts.waiting.record}`,
-      `Then approve it yourself  canon approve ${facts.waiting.stage} --record ${facts.waiting.record} --note "what you reviewed"`,
-    ]
-  }
-  return []
-}
-
 export const SIZES: readonly ReplySize[] = ['S', 'M', 'L']
 export const nextSize = (size: ReplySize): ReplySize => SIZES[(SIZES.indexOf(size) + 1) % SIZES.length] as ReplySize
 
@@ -126,12 +91,13 @@ const SIZE_WORDS: Record<ReplySize, string> = {
 /** What the model reads beside each prompt, so the size holds without touching the cached system prompt. */
 export const replyRule = (size: ReplySize): string => `Reply size ${size}: write ${SIZE_WORDS[size]}. The person set this on the band; it overrides other length guidance.`
 
+/** A typed prompt: not a slash command, and not one a mod sent. Only these carry the reply size. */
+export const isTyped = (text: string, fromPlugin: boolean): boolean => !fromPlugin && text.trim() !== '' && !text.trimStart().startsWith('/')
+
 export interface InfoFacts {
   isAwake: boolean
   size: ReplySize
   sessionUsd: number
-  running: BandFacts['running']
-  tests: Tests
   windows: readonly WindowView[]
   context: WindowView | null
   cache: CacheView | null
@@ -145,9 +111,7 @@ export function infoLine(info: Info, f: InfoFacts): string {
   }
   if (info === 'awake') return f.isAwake ? '☀ Awake: this Mac will not sleep while this session is open. Click again to let it sleep.' : '☼ This session is not keeping the Mac awake. Click to keep it awake while this session is open.'
   if (info === 'size') return `Reply size ${f.size}: ${SIZE_WORDS[f.size]}. Click again for the next size.`
-  if (info === 'cost') return f.running ? `This run has spent ${money(f.running.spendUsd)} of its ${money(f.running.capUsd)} cap.` : `This session has spent ${money(f.sessionUsd)}.`
-  if (info === 'checks') return '✓ canon check found nothing wrong in this repo.'
-  if (info === 'tests') return { none: '', ok: '✓ Tests passed, and no code changed since.', stale: '~ Code changed since tests last ran. Run them again.', failed: '✗ The last test run failed.' }[f.tests]
+  if (info === 'cost') return `This session has spent ${money(f.sessionUsd)}.`
   if (info === '7D') return limit('7D', 'weekly')
   if (info === '5H') return limit('5H', 'five-hour')
   if (info === 'ctx') return f.context ? `ctx: ${f.context.left}% of the context window is left. Under ${LOW_AT}%, compact or start a new session.` : 'ctx: no reading yet.'
@@ -155,92 +119,3 @@ export function infoLine(info: Info, f: InfoFacts): string {
   if (f.cache?.mode === 'warm') return `↻ Cache warm for ${f.cache.minutesLeft} more minutes.${f.cache.extendUsd === null ? '' : ` A click keeps it warm for an hour, for ${round(f.cache.extendUsd)}.`}`
   return ''
 }
-
-/** A title cut to fit, so one long name cannot push the band off the line. */
-export const cut = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
-
-const WORDS: Record<string, string> = { ok: ' ok', waiting: ' waiting on you', running: ' running', here: ' in progress', todo: '' }
-export const stageWord = (id: string, state: string): string => `${id[0]?.toUpperCase() ?? ''}${id.slice(1)}${WORDS[state] ?? ''}`
-export const capitalise = (word: string): string => `${word[0]?.toUpperCase() ?? ''}${word.slice(1)}`
-
-const MOVES = /(?:^|&&|;|\|\|)\s*cd\s+([^\s;&|]+)|\bgit\s+-C\s+([^\s;&|]+)/g
-
-/** The last place a Bash command moved to, absolute. A path starting with ~ or $ cannot be read here. */
-export function movedTo(command: string, cwd: string): string | null {
-  const last = [...command.matchAll(MOVES)].at(-1)
-  const path = (last?.[1] ?? last?.[2])?.replace(/^['"]|['"]$/g, '')
-  if (!path || /^[~$]/.test(path)) return null
-  return path.startsWith('/') ? path : `${cwd}/${path}`
-}
-
-/** Whether a path is already inside the product the band shows, so nothing needs reading again. */
-export const isInside = (path: string, product: string | null | undefined): boolean => Boolean(product) && `${path}/`.includes(`/${product}/`)
-
-/** What moving a live chat to another model costs: all of it is written to the cache again. */
-export function reloadUsd(cache: CacheFacts | null, prices?: Prices): number | null {
-  const price = cache?.model ? rateOf(cache.model, cache.tokens, prices) : null
-  return cache && price && cache.tokens > 0 ? (cache.tokens * price.write1h) / PER_MILLION : null
-}
-
-/** What a small model call cost; null when nobody knows the model's price, never $0. */
-export function callUsd(model: string, inputTokens: number, outputTokens: number, prices?: Prices): number | null {
-  const price = rateOf(model, inputTokens, prices)
-  return price ? (inputTokens * price.input + outputTokens * price.output) / PER_MILLION : null
-}
-
-/** A link to a record's page, for the terminal or surface to open. */
-export const fileLink = (root: string, file: string): string => `file://${encodeURI(`${root}/${file}`).replace(/[?#]/g, encodeURIComponent)}`
-
-export const usdLabel = (usd: number): string => `about $${usd.toFixed(usd < CENT ? 4 : 2)}`
-
-/** A page the knowledge gate judges: markdown under a product's .context, outside the folders with their own checks. */
-export const isGatedPage = (path: string): boolean => /\/\.context\/(?!designs\/|packs\/).*\.md$/.test(path)
-
-/** What an Edit leaves in a file, or null when its text is not there and the tool will refuse it anyway. */
-export function afterEditText(text: string, oldText: string, newText: string, isAll: boolean): string | null {
-  if (!text.includes(oldText)) return null
-  return isAll ? text.split(oldText).join(newText) : text.replace(oldText, () => newText)
-}
-
-// Tools that change nothing in the repo yet carry no read-only mark: weigh itself must run, and a question must be asked.
-const NEVER_HELD = new Set(['Skill', 'ToolSearch', 'TodoWrite', 'AskUserQuestion', 'Agent'])
-
-/** A call a large prompt makes only after weigh: anything Claude Code does not mark read-only. */
-export const isHeldForWeigh = (tool: string, isReadOnly: boolean): boolean => !isReadOnly && !NEVER_HELD.has(tool)
-
-export const isWeighSkill = (skill: string): boolean => /(^|:)weigh$/.test(skill)
-
-export const WEIGH_FIRST = 'This prompt looked large, so canon asks for the weigh skill before any change. Run the weigh skill on the request, give its verdict, then go on.'
-
-// Words that say nothing about which page answers: a prompt's own grammar, and asks like "please" or "show".
-const STOP = new Set('about after again also another because been before being between both could does doing done each from have having here into just like make more most much need only other over please same should show some such than that their them then there these they this those through very what when where which while will with would your'.split(' '))
-const MIN_WORD = 4
-const MAX_WORDS = 5
-
-/** The words of a prompt worth searching for, longest first: they are the rarest. */
-export function keywordsOf(text: string): string[] {
-  const words = text.toLowerCase().match(/[a-z][a-z0-9-]+/g) ?? []
-  return [...new Set(words.filter(w => w.length >= MIN_WORD && !STOP.has(w)))].sort((a, b) => b.length - a.length).slice(0, MAX_WORDS)
-}
-
-export interface Hit { file: string; title: string; score: number }
-
-/**
- * The pages that match most of the words, then score best. With two or more words a page must match two,
- * so one common word alone never attaches a page.
- */
-export function rankHits(perWord: readonly (readonly Hit[])[], limit = 3): Hit[] {
-  const byFile = new Map<string, { hit: Hit; words: number; score: number }>()
-  for (const hits of perWord) for (const hit of hits) {
-    const seen = byFile.get(hit.file) ?? { hit, words: 0, score: 0 }
-    byFile.set(hit.file, { hit: seen.hit, words: seen.words + 1, score: seen.score + hit.score })
-  }
-  const need = perWord.length >= 2 ? 2 : 1
-  return [...byFile.values()].filter(e => e.words >= need).sort((a, b) => b.words - a.words || b.score - a.score).slice(0, limit).map(e => e.hit)
-}
-
-/** A qmd hit as a path the agent can Read: qmd://<collection>/<path> sits under <root>/.context/. */
-export const hitPath = (root: string, file: string): string => `${root}/.context/${file.replace(/^qmd:\/\/[^/]+\//, '')}`
-
-export const knowledgeNote = (lines: readonly string[]): string =>
-  `canon found knowledge that may answer this. Read what applies before you answer, and cite it:\n${lines.join('\n')}`

@@ -1,4 +1,0 @@
-schema_version: "1.1"
-name: go-ahead-is-not-agreement
-context:
-  scaffold_script: scaffold.sh

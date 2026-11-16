@@ -1,6 +1,6 @@
 {
   "name": "canon",
-  "version": "6.7.0",
-  "description": "A band above the prompt: usage left and the prompt cache, with a button to extend it. Everything else is off until you turn it on.",
+  "version": "7.0.0",
+  "description": "A band above the prompt: usage left, the prompt cache with a button to extend it, context, reply size and an awake toggle.",
   "types": "./hooks/band/types.d.ts"
 }

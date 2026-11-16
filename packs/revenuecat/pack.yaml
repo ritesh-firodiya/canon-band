@@ -1,5 +1,0 @@
-name: revenuecat
-description: RevenueCat — subscriptions, paywalls, entitlements
-kinds: [mobile, web]
-docs:
-  - https://www.revenuecat.com/docs/llms.txt
