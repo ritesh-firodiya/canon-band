@@ -8,7 +8,10 @@
       "name": "canon",
       "source": "./",
       "version": "7.0.0",
-      "description": "A band above the prompt: usage left, the prompt cache with a button to extend it, context, reply size and an awake toggle."
+      "description": "A band above the prompt: usage left, the prompt cache with a button to extend it, context, reply size and an awake toggle.",
+      "author": {
+        "name": "Ritesh Firodiya"
+      }
     }
   ],
   "description": "canon: a band above the Claude Code prompt."

@@ -2,5 +2,8 @@
   "name": "canon",
   "version": "7.0.0",
   "description": "A band above the prompt: usage left, the prompt cache with a button to extend it, context, reply size and an awake toggle.",
-  "types": "./hooks/band/types.d.ts"
+  "types": "./hooks/band/types.d.ts",
+  "author": {
+    "name": "Ritesh Firodiya"
+  }
 }
