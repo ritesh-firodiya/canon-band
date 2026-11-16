@@ -7,8 +7,11 @@ export const TTL_MS = 60 * 60 * 1000
 const HIGH_AT = 80
 const WARN_AT = 60
 const PER_MILLION = 1_000_000
+const NARROW_BELOW = 110
 
 export const money = (usd: number): string => `$${usd.toFixed(2)}`
+
+export const isNarrow = (columns: number): boolean => columns < NARROW_BELOW
 const CENT = 0.01
 const round = (usd: number): string => (usd < CENT ? '<$0.01' : `$${usd.toFixed(2)}`)
 
@@ -133,20 +136,6 @@ export function recommendationOf(answer: string): string | null {
   return text ? text : null
 }
 
-/** The facts under the prompt, dim, after Claude's own hint. */
-export function hintTail(sessionUsd: number, windows: readonly WindowView[], context: ContextView | null): string {
-  return [money(sessionUsd), ...windows.map(w => w.label), context?.label].filter(Boolean).join(' · ')
-}
-
-/** What runs out soon, in colour above the prompt, since the line below is dim. */
-export function warningOf(windows: readonly WindowView[], context: ContextView | null): string | null {
-  const parts = [
-    ...windows.filter(w => w.level === 'bad').map(w => `${w.name} ${w.used}% used${w.reset ? `, resets in ${w.reset}` : ''}`),
-    context?.level === 'bad' ? `ctx ${tokens(context.tokens)} of ${tokens(context.window)}, compact soon` : null,
-  ].filter(Boolean)
-  return parts.length ? parts.join(' · ') : null
-}
-
 export interface InfoFacts {
   isAwake: boolean
   mode: Mode
@@ -166,11 +155,7 @@ export function infoLine(info: Info, f: InfoFacts): string {
   }
   if (info === 'awake') return f.isAwake ? '☀ Awake: this Mac will not sleep while this session is open. Click again to let it sleep.' : '☼ This session is not keeping the Mac awake. Click to keep it awake while this session is open.'
   if (info === 'size') return `Reply size ${f.size}: ${SIZE_WORDS[f.size]}. Click again for the next size.`
-  if (info === 'mode') return f.mode === 'assisted' ? 'Assisted: when Claude recommends something, a button above the prompt goes with it. Click for manual.' : 'Manual: no recommendation button. Click for assisted.'
-  if (info === 'info') {
-    const usage = f.windows.length ? f.windows.map(w => `${w.name} ${w.used}% used${w.reset ? `, resets in ${w.reset}` : ''}`).join(', ') : 'no usage reading yet'
-    return `This session has spent ${money(f.sessionUsd)}; ${usage}.\n${infoLine('ctx', f)}`
-  }
+  if (info === 'mode') return f.mode === 'assisted' ? 'Assisted: when Claude recommends something, a Go with it button sends it on. Click for manual.' : 'Manual: no recommendation button. Click for assisted.'
   if (info === 'cost') return `This session has spent ${money(f.sessionUsd)}.`
   if (info === '7D') return limit('7D', 'weekly')
   if (info === '5H') return limit('5H', 'five-hour')

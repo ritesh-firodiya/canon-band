@@ -4,47 +4,37 @@
 
 <h1 align="center">canon-band</h1>
 
-<p align="center"><b>Your Claude Code usage under the prompt, short plain replies, and a yes before anything risky.</b></p>
+<p align="center"><b>Your Claude Code usage above the prompt, short plain replies, and a yes before anything risky.</b></p>
 
 canon-band is a Claude Code mod. It adds no skills, no system prompt text and no
 server. The only thing it sends is a short note beside each prompt you type,
 about 75 tokens, with your reply size and mode.
 
 ```
-                                    ☼  assisted  S  ⓘ  ↻ 53m +$0.17
-╭──────────────────────────────────────────────────────────────────╮
-│ > your prompt                                                    │
-╰──────────────────────────────────────────────────────────────────╯
-  ? for shortcuts  $1.20 · 7D 59% · 5H 4% · ctx 23k
+☼  $1.20  assisted  S                     7D 59%  5H 4%  ctx 23k  ↻ 53m +$0.17
+╭──────────────────────────────────────────────────────────────────────────╮
+│ > your prompt                                                            │
+╰──────────────────────────────────────────────────────────────────────────╯
 ```
 
-## Under the prompt
-
-Dim, after Claude Code's own hint line:
-
-- **Cost:** what this session has spent.
-- **7D and 5H:** how much of your 7-day and 5-hour limits you have used, from 0%. Shown on a Claude plan, once the first reply comes back.
-- **ctx:** the tokens in the context window. It shows from the moment the session loads, from Claude Code's own estimate, then from each reply.
-
-## Above the prompt
-
-Each control says what it did in one line when you click it, and the line closes by itself.
+One row above the prompt, two on a narrow terminal. Click any item and it says
+what it means in one line, which closes by itself.
 
 - **☼ Awake:** a click turns it into a green ☀ that keeps this Mac and its screen awake while the session is open. macOS only.
+- **Cost:** what this session has spent.
 - **Mode:** `assisted` (the default) or `manual`. In assisted, Claude ends a choice with a `Recommend:` line, and a **Go with it** button sends it on. Manual adds no button.
 - **Reply size:** S (the default), M or L. S is one to three short lines, M the answer and a short list, L the answer with steps and trade-offs. Every size asks for plain words, the way a person talks.
-- **ⓘ:** the cost, usage, and what fills the context, largest first: system prompt, tools, memory, messages, then what is free.
+- **7D and 5H:** how much of your 7-day and 5-hour limits you have used, from 0%. Amber from 60%, red from 80% with the reset time. Shown on a Claude plan, once the first reply comes back.
+- **ctx:** the tokens in the context window, from the moment the session loads (Claude Code's own estimate, then each reply). A click shows what fills it, largest first: system prompt, tools, memory, messages, then what is free.
 - **Prompt cache:** `↻ 53m` is how long it stays warm. A click keeps it warm for another hour, and the label shows that cost first. Once cold, `◌ cold ~$8.00` is what your next message costs.
 
-The same row shows what needs you, one thing at a time:
+What needs you gets its own row above the band, one thing at a time:
 
 ```
 Claude wants to run a push: git push origin main    [Allow once]  [Block]
 Claude recommends: rename the repo                  [Go with it]  [Not now]
-7D 91% used, resets in 3d 9h
 ```
 
-From 80% used, 7D, 5H or ctx shows in red above the prompt, with the reset time or "compact soon".
 Mode and reply size start over in each new session.
 
 ## A yes before anything risky

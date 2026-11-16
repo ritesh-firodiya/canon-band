@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { breakdownLine, cacheView, canExtend, coldLabel, contextView, extendLabel, hintTail, infoLine, isTyped, nextMode, nextSize, recommendationOf, replyRule, tokens, warningOf, windowViews } from './facts'
+import { breakdownLine, cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextMode, nextSize, recommendationOf, replyRule, tokens, windowViews } from './facts'
 import { commandRisk, readRisk } from './guard'
 import { priceOf } from './prices'
 
@@ -127,13 +127,9 @@ test('critical commands need the person, everyday ones do not', () => {
   expect(readRisk('/w/shop/src/env.ts')).toBeNull()
 })
 
-test('the facts under the prompt, and a warning above only when something runs out', () => {
-  const usage = windowViews([{ kind: 'seven_day', percentUsed: 59 }, { kind: 'five_hour', percentUsed: 4 }], NOW)
-  expect(hintTail(1.2, usage, contextView({ tokens: 23_300, window: 200_000, percent: 12 }))).toBe('$1.20 · 7D 59% · 5H 4% · ctx 23k')
-  expect(hintTail(0, [], null)).toBe('$0.00')
-  expect(warningOf(usage, null)).toBeNull()
-  const high = windowViews([{ kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T19:00:00Z' }], NOW)
-  expect(warningOf(high, contextView({ tokens: 176_000, window: 200_000, percent: 88 }))).toBe('7D 91% used, resets in 3d 9h · ctx 176k of 200k, compact soon')
+test('a narrow terminal uses two rows', () => {
+  expect(isNarrow(80)).toBe(true)
+  expect(isNarrow(120)).toBe(false)
 })
 
 test('a click on a short item says what it means in one line', () => {
@@ -147,18 +143,19 @@ test('a click on a short item says what it means in one line', () => {
   expect(infoLine('ctx', base)).toBe('ctx: 80k of 200k tokens used (40%).')
   expect(infoLine('ctx', { ...base, breakdown: ROWS })).toContain('\nSystem tools 14k · Messages 6k')
   expect(infoLine('mode', base)).toContain('Assisted')
-  expect(infoLine('info', base)).toBe('This session has spent $1.20; 7D 91% used, resets in 3d 9h.\nctx: 80k of 200k tokens used (40%).')
+
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`on ${surface}, the controls above the prompt: the sun, the mode, the reply size and info`, async ($, on) => {
+  test(`on ${surface}, the band draws the sun, the cost, the mode, the reply size and the context`, async ($, on) => {
     engine(on)
     await $.session.start({ cwd: '/w/shop', surface, isInteractive: true })
     const ui = await $.ui.mount(render(surface))
     expect(await ui.find({ type: 'Text', text: /☼/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^assisted$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^S$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^ⓘ$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^\$0\.00$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^ctx 23k$/ })).toBeDefined()
     await ui.unmount()
   })
 }
@@ -243,14 +240,23 @@ test('the sun keeps the Mac awake with caffeinate, and says so', async ($, on) =
   await ui.unmount()
 })
 
-test('ⓘ shows the cost, usage and what fills the context, and a second click closes it', async ($, on) => {
+test('a click on ctx breaks the tokens down, and a second click closes it', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount(render('terminal'))
-  await ui.press({ key: 'info' })
-  expect(await ui.find({ type: 'Text', text: /This session has spent \$0\.00; no usage reading yet\.\nctx: 23k of 200k tokens used \(12%\)\.\nSystem tools 14k/ })).toBeDefined()
-  await ui.press({ key: 'info' })
-  expect(await ui.find({ type: 'Text', text: /This session has spent/ })).toBeUndefined()
+  await ui.press({ key: 'ctx' })
+  expect(await ui.find({ type: 'Text', text: /^ctx: 23k of 200k tokens used \(12%\)\.\nSystem tools 14k · Messages 6k/ })).toBeDefined()
+  await ui.press({ key: 'ctx' })
+  expect(await ui.find({ type: 'Text', text: /tokens used/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a click on the cost says what it counts', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(render('terminal'))
+  await ui.press({ key: 'cost' })
+  expect(await ui.find({ type: 'Text', text: /This session has spent \$0\.00/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -266,22 +272,6 @@ test('a panel closes by itself, and one opened later is not closed early', async
   expect(await ui.find({ type: 'Text', text: /Reply size/ })).toBeDefined()
   await clock!.advance(4000)
   expect(await ui.find({ type: 'Text', text: /Reply size/ })).toBeUndefined()
-  await ui.unmount()
-})
-
-test('under the prompt, the facts follow the hint line, from load', async ($, on) => {
-  const tails: (string | undefined)[] = []
-  engine(on)
-  // This hook stands for the engine, which draws its hint with the tail after it.
-  on('ui.render', ($: any, e: any) => {
-    const { Text } = $.ui.resolve(e)
-    tails.push(e.props.tail)
-    return <Text>{`${e.props.hint} ${e.props.tail}`}</Text>
-  })
-  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
-  const ui = await $.ui.mount({ plugin: 'canon-band', component: 'PromptHint', surface: 'terminal', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' } } as any)
-  expect(await ui.find({ type: 'Text', text: '? for shortcuts $0.00 · ctx 23k' })).toBeDefined()
-  expect(tails).toEqual(['$0.00 · ctx 23k'])
   await ui.unmount()
 })
 

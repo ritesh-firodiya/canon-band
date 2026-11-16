@@ -2,7 +2,7 @@
   "name": "canon-band",
   "version": "8.0.0",
   "private": true,
-  "description": "Usage under the Claude Code prompt, short plain replies, a Go with it button for recommendations, and a yes before anything risky.",
+  "description": "Usage above the Claude Code prompt, short plain replies, a Go with it button for recommendations, and a yes before anything risky.",
   "license": "MIT",
   "author": "Ritesh Firodiya",
   "repository": {

@@ -1,4 +1,4 @@
-export type Info = 'awake' | 'mode' | 'size' | 'info' | 'cost' | '7D' | '5H' | 'ctx' | 'cache'
+export type Info = 'awake' | 'mode' | 'size' | 'cost' | '7D' | '5H' | 'ctx' | 'cache'
 export type Level = 'ok' | 'warn' | 'bad'
 export type ReplySize = 'S' | 'M' | 'L'
 export type Mode = 'manual' | 'assisted'

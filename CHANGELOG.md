@@ -5,9 +5,9 @@
 ### Changed
 
 - **Renamed to canon-band.** Install it with `claude plugin install canon-band@canon-band` from `ritesh-firodiya/canon-band`, after `claude plugin uninstall canon@canon`.
-- **The facts go under the prompt.** Cost, 7D, 5H and ctx follow Claude Code's own hint line. The controls stay in one row above, since the terminal draws no buttons under the prompt.
-- **Usage counts up.** 7D and 5H show the share used, from 0%. From 80% a warning in red shows above the prompt with the reset time.
-- **Context in tokens, from load.** ctx shows the tokens in the window (`ctx 23k`) before the first reply, from Claude Code's local estimate. ⓘ shows what fills it, largest first, then what is free.
+- **What needs you gets its own row** above the band: a blocked command, or a recommendation to go with.
+- **Usage counts up.** 7D and 5H show the share used, from 0%: amber from 60%, red from 80% with the reset time.
+- **Context in tokens, from load.** ctx shows the tokens in the window (`ctx 23k`) before the first reply, from Claude Code's local estimate. A click shows what fills it, largest first, then what is free.
 - **Short, plain replies.** The reply size starts at S, and every size asks for plain words, the way a person talks. Only prompts the person types carry it: SDK runs, schedules and other agents do not.
 
 ### Added

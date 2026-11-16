@@ -8,11 +8,11 @@
       "name": "canon-band",
       "source": "./",
       "version": "8.0.0",
-      "description": "Usage under the Claude Code prompt, short plain replies, a Go with it button for recommendations, and a yes before anything risky.",
+      "description": "Usage above the Claude Code prompt, short plain replies, a Go with it button for recommendations, and a yes before anything risky.",
       "author": {
         "name": "Ritesh Firodiya"
       }
     }
   ],
-  "description": "canon-band: usage under the Claude Code prompt, and a yes before anything risky."
+  "description": "canon-band: usage above the Claude Code prompt, and a yes before anything risky."
 }

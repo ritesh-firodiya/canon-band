@@ -1,12 +1,12 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import { cacheView, canExtend, coldLabel, contextView, extendLabel, hintTail, infoLine, isTyped, nextMode, nextSize, recommendationOf, replyRule, warningOf, windowViews } from './facts'
+import { cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, money, nextMode, nextSize, recommendationOf, replyRule, windowViews } from './facts'
 import { commandRisk, readRisk } from './guard'
-import type { Blocked, CacheFacts, ContextFacts, ContextRow, Info, Mode, ReplySize, UsageWindow } from './types'
+import type { Blocked, CacheFacts, ContextFacts, ContextRow, Info, Level, Mode, ReplySize, UsageWindow } from './types'
 
-// The facts go dim under the prompt, after Claude's own hint; the terminal draws no buttons there.
-// The controls sit in one row above the prompt, beside whatever needs the person: a blocked command, a recommendation, a limit running out.
+// The band above the prompt: the awake toggle, cost, mode and reply size on the left, usage, context and cache on the right.
+// What needs the person (a blocked command, a recommendation) gets its own row above it.
 // Cache and usage logic follow ribbon (MIT, robonuggets/ribbon).
 
 const TICK_MS = 30_000
@@ -15,6 +15,8 @@ const EXTEND_MESSAGE = 'Reply with only: ok'
 const AMBER = '#f0b429'
 const RED = '#ff7b72'
 const GREEN = '#56d364'
+
+const LEVEL_COLOR: Record<Level, string> = { ok: GREEN, warn: AMBER, bad: RED }
 
 const windows = atom({ plugin: 'canon-band', key: 'windows' } as const, [] as UsageWindow[])
 const cache = atom({ plugin: 'canon-band', key: 'cache' } as const, null as CacheFacts | null)
@@ -106,7 +108,7 @@ async function showPanel($: EngineInterface, name: Info | null): Promise<void> {
   const mine = ++shown
   await update($, panel, () => name)
   if (!name) return
-  $.clock.after(name === 'ctx' || name === 'info' ? READ_LONG_MS : READ_MS, async () => {
+  $.clock.after(name === 'ctx' ? READ_LONG_MS : READ_MS, async () => {
     if (shown === mine) await update($, panel, () => null)
   })
 }
@@ -173,12 +175,6 @@ export const register: Register = on => {
     return result
   }).catch(($, e, next) => next(e))
 
-  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    const now = await $.clock.now()
-    const tail = hintTail(await read($, taskUsd), windowViews(await read($, windows), now), contextView(await read($, context)))
-    return next({ ...e, props: { ...e.props, tail: e.props.tail ? `${e.props.tail} · ${tail}` : tail } })
-  }).catch(($, e, next) => next(e))
-
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     // Other mods share this slot: theirs draw below.
@@ -189,6 +185,7 @@ export const register: Register = on => {
     const extending = await read($, isExtending)
     const view = cacheView(await read($, cache), now)
     const usage = windowViews(await read($, windows), now)
+    const sessionUsd = await read($, taskUsd)
     const ctx = contextView(await read($, context))
     const awake = await read($, isAwake)
     const size = await read($, replySize)
@@ -199,10 +196,10 @@ export const register: Register = on => {
     const toggle = (name: Info) => async () => showPanel($, (await read($, panel)) === name ? null : name)
     // An action says what it did, so a second click acts again instead of closing.
     const say = (name: Info) => showPanel($, name)
-    const showInfo = async () => {
-      if ((await read($, panel)) === 'info') return showPanel($, null)
+    const showContext = async () => {
+      if ((await read($, panel)) === 'ctx') return showPanel($, null)
       await refreshContext($).catch(() => undefined)
-      await say('info')
+      await say('ctx')
     }
     const extend = async () => {
       await update($, isExtending, () => true)
@@ -219,41 +216,48 @@ export const register: Register = on => {
       void $.prompt.submit({ text: isAllowed ? `Allowed once: run \`${b.command}\` again.` : `Not allowed: do not run \`${b.command}\`. Find another way, or stop and say why.` })
     }
     const button = (key: string, label: string, color: string | undefined, onPress: () => unknown) => (
-      <Button key={key} plain onPress={onPress}><Text color={color} dimColor={!color} bold={!!color}>{label}</Text></Button>
+      <Button key={key} plain onPress={onPress}><Text color={color} dimColor={!color}>{label}</Text></Button>
     )
 
-    // What needs the person, most urgent first; one at a time.
-    const warning = warningOf(usage, ctx)
+    // What needs the person, on its own row above the band: a blocked command first, then a recommendation.
     const needs = stopped
       ? [<Text key="ask" color={RED}>{`Claude wants to run ${stopped.what}: ${stopped.command.slice(0, 60)}`}</Text>, button('allow', '[Allow once]', GREEN, () => allow(stopped, true)), button('block', '[Block]', RED, () => allow(stopped, false))]
       : pick && current === 'assisted' && !e.props.isWorking
         ? [<Text key="pick">{`Claude recommends: ${pick.slice(0, 70)}`}</Text>, button('go', '[Go with it]', GREEN, () => answer(`Go with your recommendation: ${pick}`)), button('skip', '[Not now]', undefined, async () => update($, recommendation, () => null))]
-        : warning
-          ? [<Text key="warning" color={RED}>{warning}</Text>]
-          : []
+        : []
 
-    const warm = view?.mode === 'warm' ? view : null
-    const controls = [
+    const left = [
       <Button key="awake" plain onPress={async () => { await setAwake($, !awake); await say('awake') }}>
         <Text color={awake ? GREEN : undefined} bold={awake}>{awake ? '☀︎' : '☼'}</Text>
       </Button>,
+      button('cost', money(sessionUsd), undefined, toggle('cost')),
       button('mode', current, current === 'assisted' ? GREEN : undefined, async () => { await update($, mode, nextMode); await say('mode') }),
       button('size', size, AMBER, async () => { await update($, replySize, nextSize); await say('size') }),
-      button('info', 'ⓘ', undefined, showInfo),
+    ]
+
+    const warm = view?.mode === 'warm' ? view : null
+    const right = [
+      ...usage.map(w => button(w.name, w.label, LEVEL_COLOR[w.level], toggle(w.name as Info))),
+      ctx ? button('ctx', ctx.label, LEVEL_COLOR[ctx.level], showContext) : null,
       view?.mode === 'cold' ? button('cache', coldLabel(view.nextUsd), AMBER, toggle('cache')) : null,
       extending ? <Text key="extending" dimColor>extending...</Text> : null,
       !extending && warm && canExtend(warm, e.props.isWorking) ? button('cache', extendLabel(warm.minutesLeft, warm.extendUsd), GREEN, extend) : null,
       !extending && warm && !canExtend(warm, e.props.isWorking) ? <Text key="cache-time" color={GREEN}>{extendLabel(warm.minutesLeft, null)}</Text> : null,
     ]
 
-    const line = open ? infoLine(open, { isAwake: awake, mode: current, size, sessionUsd: await read($, taskUsd), windows: usage, context: ctx, breakdown: await read($, breakdown), cache: view }) : ''
+    const row = (key: string, start: RenderChildren[], end: RenderChildren[]) => (
+      <Box key={key} flexDirection="row" gap={2} width={e.props.bodyColumns}>
+        {start}
+        <Box key="grow" flexGrow={1} />
+        {end}
+      </Box>
+    )
+    const rows = isNarrow(e.props.bodyColumns) ? [row('controls', left, []), row('limits', [], right)] : [row('band', left, right)]
+    const line = open ? infoLine(open, { isAwake: awake, mode: current, size, sessionUsd, windows: usage, context: ctx, breakdown: await read($, breakdown), cache: view }) : ''
     const mine = (
       <Box flexDirection="column" width={e.props.bodyColumns}>
-        <Box key="row" flexDirection="row" gap={2} width={e.props.bodyColumns}>
-          {needs}
-          <Box key="grow" flexGrow={1} />
-          {controls}
-        </Box>
+        {needs.length ? row('needs', needs, []) : null}
+        {rows}
         {line ? <Text key="info-line">{line}</Text> : null}
       </Box>
     )
