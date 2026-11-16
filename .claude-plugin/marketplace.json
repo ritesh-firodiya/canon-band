@@ -7,7 +7,7 @@
     {
       "name": "canon-band",
       "source": "./",
-      "version": "9.0.0",
+      "version": "10.0.0",
       "description": "Usage above the Claude Code prompt, short plain replies, and a yes before anything risky.",
       "author": {
         "name": "Ritesh Firodiya"

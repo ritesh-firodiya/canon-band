@@ -7,8 +7,6 @@ export type Family = 'fable' | 'opus' | 'sonnet' | 'haiku'
 /** This Mac's spend in one month, by session, so a resumed session counts once. */
 export type MonthSpend = { month: string; sessions: Record<string, number> }
 
-export type Blocked = { command: string; what: string }
-
 export type CacheFacts = { lastAt: number; tokens: number; model: string | null }
 
 export type ContextFacts = { tokens: number; window: number; percent: number }
@@ -29,7 +27,6 @@ declare module 'claude-code' {
       breakdown: ContextRow[] | null
       isAwake: boolean
       replySize: ReplySize
-      blocked: Blocked | null
       effort: Effort | null
       seenEffort: Effort | null
       monthUsd: number

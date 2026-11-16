@@ -2,11 +2,10 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import { addSpend, cacheView, canExtend, coldLabel, contextView, extendLabel, FAMILIES, familyOf, infoLine, isEffort, isNarrow, isTyped, money, monthOf, monthTotal, monthView, nextEffort, nextSize, replyRule, switchLabel, switchUsd, windowViews } from './facts'
-import { commandRisk, readRisk } from './guard'
-import type { Blocked, CacheFacts, ContextFacts, ContextRow, Effort, Family, Info, Level, MonthSpend, ReplySize, UsageWindow } from './types'
+import type { CacheFacts, ContextFacts, ContextRow, Effort, Family, Info, Level, MonthSpend, ReplySize, UsageWindow } from './types'
 
 // The band above the prompt: the awake toggle, cost and reply size on the left, usage, context and cache on the right.
-// What needs the person (a blocked command, the model picker) gets its own row above it.
+// The model picker gets its own row above it.
 // Cache and usage logic follow ribbon (MIT, robonuggets/ribbon).
 
 const TICK_MS = 30_000
@@ -27,7 +26,6 @@ const context = atom({ plugin: 'canon-band', key: 'context' } as const, null as 
 const breakdown = atom({ plugin: 'canon-band', key: 'breakdown' } as const, null as ContextRow[] | null)
 const isAwake = atom({ plugin: 'canon-band', key: 'isAwake' } as const, false)
 const replySize = atom({ plugin: 'canon-band', key: 'replySize' } as const, 'S' as ReplySize)
-const blocked = atom({ plugin: 'canon-band', key: 'blocked' } as const, null as Blocked | null)
 // The effort the person picked on the band, and the one the engine last sent; null until there is one.
 const effort = atom({ plugin: 'canon-band', key: 'effort' } as const, null as Effort | null)
 const seenEffort = atom({ plugin: 'canon-band', key: 'seenEffort' } as const, null as Effort | null)
@@ -47,18 +45,8 @@ async function recordSpend($: EngineInterface, usd: number | null): Promise<void
   await update($, monthUsd, () => monthTotal(next, month))
 }
 
-// Headless runs (Archon, Babul, `claude -p`) have no one to click Allow once; Babul's own hook guards those.
+// Headless runs (Archon, Babul, `claude -p`) have no band to show.
 let isInteractive = false
-// Commands the person allowed, each for one run. Module state, so a reload asks again.
-const allowedOnce = new Set<string>()
-
-/** Refuses a critical operation until the person allows it once on the band. */
-async function guard($: EngineInterface, command: string, what: string | null): Promise<{ deny: string } | null> {
-  if (!what || !isInteractive) return null
-  if (allowedOnce.delete(command)) return null
-  await update($, blocked, () => ({ command, what }))
-  return { deny: `canon-band: this is ${what}, which needs the person's yes. Stop and wait: they can click Allow once above the prompt, and then you run the exact same command again.` }
-}
 
 // The caffeinate child behind ☀; ☼ when there is none. Module state, so a reload, which kills it, starts asleep again.
 // -w ties caffeinate to the process that started it, so a crash or kill -9 of Claude Code cannot leave the Mac awake.
@@ -169,11 +157,6 @@ export const register: Register = (on, options) => {
     return next({ ...e, context: [...(e.context ?? []), replyRule(await read($, replySize))] })
   }).catch(($, e, next) => next(e))
 
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => (await guard($, e.command, commandRisk(e.command))) ?? next(e))
-    .catch(($, e, next) => (next.called ? next(e) : { deny: 'canon-band: its guard failed, so the command did not run.' }))
-  on('tool.call', { tool: 'Read' }, async ($, e, next) => (await guard($, e.file_path, readRisk(e.file_path))) ?? next(e))
-    .catch(($, e, next) => (next.called ? next(e) : { deny: 'canon-band: its guard failed, so the file was not read.' }))
-
   on('turn.step', async function* ($, e, next) {
     // Each main request reads or writes the cache, so its start restarts the hour.
     if (e.agentId) return yield* next(e)
@@ -209,7 +192,6 @@ export const register: Register = (on, options) => {
     const ctx = contextView(await read($, context))
     const awake = await read($, isAwake)
     const size = await read($, replySize)
-    const stopped = await read($, blocked)
     const family = familyOf(await $.session.model())
     const shownEffort = (await read($, effort)) ?? (await read($, seenEffort))
     const picking = await read($, isPicking)
@@ -229,11 +211,6 @@ export const register: Register = (on, options) => {
       await say('cache')
       void $.prompt.submit({ text: EXTEND_MESSAGE })
     }
-    const allow = async (b: Blocked, isAllowed: boolean) => {
-      await update($, blocked, () => null)
-      if (isAllowed) allowedOnce.add(b.command)
-      void $.prompt.submit({ text: isAllowed ? `Allowed once: run \`${b.command}\` again.` : `Not allowed: do not run \`${b.command}\`. Find another way, or stop and say why.` })
-    }
     const button = (key: string, label: string, color: string | undefined, onPress: () => unknown) => (
       <Button key={key} plain onPress={onPress}><Text color={color} dimColor={!color}>{label}</Text></Button>
     )
@@ -248,12 +225,8 @@ export const register: Register = (on, options) => {
       button('cancel', '[Cancel]', undefined, () => switchTo(null)),
     ]
 
-    // What needs the person, on its own row above the band: a blocked command first, then the model picker.
-    const needs = stopped
-      ? [<Text key="ask" color={RED}>{`Claude wants to run ${stopped.what}: ${stopped.command.slice(0, 60)}`}</Text>, button('allow', '[Allow once]', GREEN, () => allow(stopped, true)), button('block', '[Block]', RED, () => allow(stopped, false))]
-      : picking
-        ? pickModel
-        : []
+    // The model picker, on its own row above the band.
+    const needs = picking ? pickModel : []
 
     const left = [
       <Button key="awake" plain onPress={async () => { await setAwake($, !awake); await say('awake') }}>

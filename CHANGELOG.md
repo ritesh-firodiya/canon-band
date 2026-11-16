@@ -1,10 +1,16 @@
 # Changelog
 
+## 10.0.0 — 2026-11-16
+
+### Removed
+
+- **Allow once is gone.** canon-band no longer stops deletes, pushes, deploys, releases or secret reads to ask. No **Allow once** or **Block** row. Claude Code's own permission mode is the only check left.
+
 ## 9.0.0 — 2026-11-16
 
 ### Removed
 
-- **Modes are gone.** No more `assisted` and `manual`, no `Recommend:` line and no **Go with it** button. Claude no longer stops at each choice to wait for a click, so long autonomous runs keep going. Risky commands still wait for **Allow once**.
+- **Modes are gone.** No more `assisted` and `manual`, no `Recommend:` line and no **Go with it** button. Claude no longer stops at each choice to wait for a click, so long autonomous runs keep going.
 
 ## 8.1.0 — 2026-11-16
 

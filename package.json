@@ -1,6 +1,6 @@
 {
   "name": "canon-band",
-  "version": "9.0.0",
+  "version": "10.0.0",
   "private": true,
   "description": "Usage above the Claude Code prompt, short plain replies, and a yes before anything risky.",
   "license": "MIT",

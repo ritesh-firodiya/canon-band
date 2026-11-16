@@ -1,7 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { addSpend, breakdownLine, cacheView, familyOf, monthTotal, monthView, nextEffort, switchLabel, switchUsd, timeLeft, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextSize, replyRule, tokens, windowViews } from './facts'
-import { commandRisk, readRisk } from './guard'
 import { priceOf } from './prices'
 
 const OPUS = 'claude-opus-5-5'
@@ -114,17 +113,6 @@ test('only what the person types carries the rule: not slash commands, SDK runs,
   expect(isTyped('/clear', 'composer')).toBe(false)
   expect(isTyped('  ', 'composer')).toBe(false)
   for (const origin of ['sdk', 'plugin', 'scheduled-trigger', 'peer', 'coordinator', 'unclassified']) expect(isTyped('why?', origin)).toBe(false)
-})
-
-test('critical commands need the person, everyday ones do not', () => {
-  const critical = ['rm -rf dist', 'rm -r old', 'cd x && git push origin main', 'git push --force', 'git reset --hard HEAD~1', 'git clean -fd', 'git branch -D old', 'psql -c "DROP TABLE users"', 'pnpm prisma migrate reset', 'vercel --prod', 'firebase deploy', 'eas submit -p ios', 'npm publish', 'npm deprecate x "gone"', 'gh release create v1', 'gh repo delete me/x', 'gh repo edit --visibility public', 'stripe charges create --live', 'cat .env', 'cat apps/web/.env.local', 'cp key.p8 /tmp', 'ls ~/git/local/secrets']
-  const everyday = ['git status', 'git log -3', 'rm file.txt', 'git pull', 'pnpm test', 'cat .env.example', 'grep -r environment src', 'git commit -m "push the band below" -- README.md', 'npm view x version']
-  for (const c of critical) expect([c, commandRisk(c)]).toEqual([c, expect.any(String)])
-  for (const c of everyday) expect([c, commandRisk(c)]).toEqual([c, null])
-  expect(readRisk('/w/shop/.env')).toBe('reading a secret')
-  expect(readRisk('/w/shop/.env.example')).toBeNull()
-  expect(readRisk('/Users/me/git/local/secrets/x/key')).toBe('reading a secret')
-  expect(readRisk('/w/shop/src/env.ts')).toBeNull()
 })
 
 test('a narrow terminal uses two rows', () => {
@@ -270,40 +258,6 @@ test('a panel closes by itself, and one opened later is not closed early', async
   await clock!.advance(4000)
   expect(await ui.find({ type: 'Text', text: /Reply size/ })).toBeUndefined()
   await ui.unmount()
-})
-
-test('a critical command waits for Allow once, then runs once', async ($, on) => {
-  const sent: string[] = []
-  const ran: string[] = []
-  engine(on)
-  on('prompt.submit', (_: unknown, e: any) => {
-    sent.push(e.text)
-    return { text: e.text }
-  })
-  on('tool.call', (_: unknown, e: any) => {
-    ran.push(e.command)
-    return { result: { stdout: '', stderr: '', interrupted: false } }
-  })
-  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
-  const push = { tool: 'Bash', command: 'git push origin main' } as any
-  expect(await $.tool.call(push)).toMatchObject({ deny: expect.stringContaining('a push') })
-  const ui = await $.ui.mount(render('terminal'))
-  expect(await ui.find({ type: 'Text', text: /Claude wants to run a push: git push origin main/ })).toBeDefined()
-  await ui.press({ key: 'allow' })
-  expect(sent).toEqual(['Allowed once: run `git push origin main` again.'])
-  expect(await ui.find({ type: 'Text', text: /Claude wants to run/ })).toBeUndefined()
-  await $.tool.call(push)
-  expect(await $.tool.call(push)).toMatchObject({ deny: expect.any(String) })
-  expect(await $.tool.call({ tool: 'Bash', command: 'git status' } as any)).not.toHaveProperty('deny')
-  expect(ran).toEqual(['git push origin main', 'git status'])
-  await ui.unmount()
-})
-
-test('a headless run is not guarded by the band', async ($, on) => {
-  engine(on)
-  on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
-  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: false })
-  expect(await $.tool.call({ tool: 'Bash', command: 'git push' } as any)).not.toHaveProperty('deny')
 })
 
 test('a gateway spend limit shows like the others, led by the time left', () => {

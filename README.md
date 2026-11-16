@@ -4,7 +4,7 @@
 
 <h1 align="center">canon-band</h1>
 
-<p align="center"><b>Your Claude Code usage above the prompt, short plain replies, and a yes before anything risky.</b></p>
+<p align="center"><b>Your Claude Code usage above the prompt, and short plain replies.</b></p>
 
 canon-band is a Claude Code mod. It adds no skills, no system prompt text and no
 server. The only thing it sends is a short note beside each prompt you type,
@@ -31,34 +31,10 @@ what it means in one line, which closes by itself.
 - **ctx:** the tokens in the context window, from the moment the session loads (Claude Code's own estimate, then each reply). A click shows what fills it, largest first: system prompt, tools, memory, messages, then what is free.
 - **Prompt cache:** `↻ 53m` is how long it stays warm. A click keeps it warm for another hour, and the label shows that cost first. Once cold, `◌ cold ~$8.00` is what your next message costs.
 
-What needs you gets its own row above the band, one thing at a time:
-
-```
-Claude wants to run a push: git push origin main    [Allow once]  [Block]
-```
-
 Reply size starts over in each new session.
 
-## A yes before anything risky
-
-These wait for **Allow once**:
-
-- **Deletes:** `rm -r`, `git reset --hard`, `git clean -f`, `git branch -D`, `git filter-repo`, dropping or truncating a table, database or schema, and a database reset (Prisma, Supabase, Drizzle).
-- **Pushes:** any `git push`.
-- **Deploys and store submits:** Vercel, Netlify, Firebase, Fly, Wrangler, EAS submit or update, fastlane.
-- **Releases:** `npm`, `pnpm` or `yarn` publish, unpublish or deprecate, and `gh release create`.
-- **Repo changes:** `gh repo` delete, rename, archive or a visibility change.
-- **Money:** `stripe` commands with `--live`.
-- **Secrets:** reading an `.env` file (not `.env.example`), a key file (`.p8`, `.p12`, `.pem`, `.jks`, `.keystore`, `.mobileprovision`, `id_rsa`, `id_ed25519`, `credentials.json`) or anything under `local/secrets`, by a command or by Claude's Read tool.
-
-**Allow once** lets that exact command run one time, and tells Claude to run it again.
-**Block** tells Claude not to run it.
-
-It is a safety net, not a sandbox. It matches shell commands and file reads by
-pattern. Edits, MCP tools and a command written to avoid the pattern get past it.
-
-Only your own sessions are guarded, and only prompts you type get the reply note.
-Headless runs (Archon, `claude -p`, the SDK), schedules and other agents are left alone.
+Only prompts you type get the reply note. Headless runs (Archon, `claude -p`,
+the SDK), schedules and other agents are left alone.
 
 ## Install
 
@@ -74,8 +50,7 @@ canon (rules, knowledge, checks and standards) moved into
 ## Develop
 
 The mod is a Claude Code hooks module in `hooks/band/`: `register.tsx` draws and
-hooks, `facts.ts` holds the pure logic, `guard.ts` the list of risky operations
-and `prices.ts` the public list prices that price the cache. Run the tests with
+hooks, `facts.ts` holds the pure logic and `prices.ts` the public list prices that price the cache. Run the tests with
 `pnpm test` (it runs `claude plugin test .`).
 
 Cache and usage logic follow ribbon (MIT, robonuggets/ribbon).
