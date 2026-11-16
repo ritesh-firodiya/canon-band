@@ -1,9 +1,17 @@
 {
   "name": "canon-band",
-  "version": "8.0.0",
+  "version": "8.1.0",
   "description": "Usage above the Claude Code prompt, short plain replies, a Go with it button for recommendations, and a yes before anything risky.",
   "types": "./hooks/band/types.d.ts",
   "author": {
     "name": "Ritesh Firodiya"
+  },
+  "userConfig": {
+    "monthlyBudgetUsd": {
+      "type": "number",
+      "title": "Monthly limit (USD)",
+      "description": "Your monthly spend limit, for example 1000. The band shows this Mac's spend this month against it. Leave empty for none.",
+      "default": 0
+    }
   }
 }

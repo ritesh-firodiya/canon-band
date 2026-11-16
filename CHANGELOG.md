@@ -1,5 +1,12 @@
 # Changelog
 
+## 8.1.0 — 2026-11-16
+
+### Added
+
+- **Model and effort are back.** The band shows the family the session runs and its effort. A click on effort sets the next one, carried by each main request, so the cache holds. A click on the model opens the other families, each priced at what the next message costs, and a pick runs `/model`.
+- **A spend limit, for enterprise setups.** A Claude gateway's spend limit shows like the weekly one (`12d 41%`). Off a Claude plan, the band shows this Mac's spend this month (`Nov $212`), against a **Monthly limit (USD)** set in the plugin settings (`Nov $212/$1000`).
+
 ## 8.0.0 — 2026-11-16
 
 ### Changed

@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { breakdownLine, cacheView, timeLeft, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextMode, nextSize, recommendationOf, replyRule, tokens, windowViews } from './facts'
+import { addSpend, breakdownLine, cacheView, familyOf, monthTotal, monthView, nextEffort, switchLabel, switchUsd, timeLeft, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextMode, nextSize, recommendationOf, replyRule, tokens, windowViews } from './facts'
 import { commandRisk, readRisk } from './guard'
 import { priceOf } from './prices'
 
@@ -20,13 +20,14 @@ const ROWS = [
 ] as const
 const BREAKDOWN = { categories: ROWS.map(r => ({ ...r, color: 'inactive', isDeferred: r.kind === 'deferred' })), totalTokens: 23_300, maxTokens: 200_000, rawMaxTokens: 200_000, percentage: 12 }
 
-function engine(on: any, frozen = false) {
+function engine(on: any, frozen = false, costUsd?: number) {
   on('env.get', () => ({ value: undefined }))
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/w/shop' }))
   on('session.model', () => ({ value: OPUS }))
   // Before the first reply: no live reading, only the local estimate.
-  on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { window: 200_000, breakdown: BREAKDOWN } } }))
+  on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { window: 200_000, breakdown: BREAKDOWN }, ...(costUsd === undefined ? {} : { cost: { usd: costUsd } }) } }))
+  on('session.id', () => ({ value: 's1' }))
   mock.store(on)
   if (!frozen) return mock.clock(on)
   on('clock.now', () => ({ value: NOW }))
@@ -332,5 +333,85 @@ test('in assisted mode, a recommendation gets a Go with it button', async ($, on
   await ui.press({ key: 'go' })
   expect(sent).toEqual(['Go with your recommendation: rename the repo to canon-band'])
   expect(await ui.find({ type: 'Text', text: /Claude recommends/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a gateway spend limit shows like the others, led by the time left', () => {
+  const now = Date.parse('2026-11-02T00:00:00Z')
+  expect(windowViews([{ kind: 'spend_limit', percentUsed: 41, resetsAt: '2026-11-14T03:00:00Z' }], now)).toEqual([{ name: 'Spend', used: 41, reset: '12d 3h', label: '12d 41%', level: 'ok' }])
+})
+
+test('a model id finds its family, Bedrock and dated ids too, and a switch is priced at the new cache', () => {
+  expect(familyOf('us.anthropic.claude-opus-5-5-v1:0')).toBe('opus')
+  expect(familyOf('claude-fable-5-1')).toBe('fable')
+  expect(familyOf('claude-haiku-5-5-20261001')).toBe('haiku')
+  expect(familyOf('acme-small-1')).toBeNull()
+  expect(switchUsd(1_000_000, 'opus')).toBe(8)
+  expect(switchUsd(0, 'opus')).toBeNull()
+  expect(switchLabel('opus', 8)).toBe('opus ~$8.00')
+  expect(switchLabel('opus', null)).toBe('opus')
+  expect([nextEffort('low'), nextEffort('high'), nextEffort('max')]).toEqual(['medium', 'xhigh', 'low'])
+})
+
+test('the month adds each session once, and a new month starts from zero', () => {
+  let store = addSpend(null, '2026-11', 'a', 10)
+  store = addSpend(store, '2026-11', 'b', 5)
+  store = addSpend(store, '2026-11', 'a', 12)
+  expect(monthTotal(store, '2026-11')).toBe(17)
+  expect(monthTotal(addSpend(store, '2026-12', 'c', 1), '2026-12')).toBe(1)
+  expect(monthTotal(store, '2026-12')).toBe(0)
+  expect(monthView('2026-11', 212.4, null)).toEqual({ label: 'Nov $212', level: 'ok' })
+  expect(monthView('2026-11', 212.4, 1000)).toEqual({ label: 'Nov $212/$1000', level: 'ok' })
+  expect(monthView('2026-11', 850, 1000).level).toBe('bad')
+})
+
+test('off a Claude plan, the band shows the month on this Mac against the limit set in the settings', { options: { monthlyBudgetUsd: 1000 } }, async ($, on) => {
+  engine(on, false, 212)
+  on('turn.complete', (_: unknown, e: any) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
+  await $.turn.complete({ answer: 'ok', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' } as any)
+  const ui = await $.ui.mount(render('terminal'))
+  expect(await ui.find({ type: 'Text', text: /^\w{3} \$212\/\$1000$/ })).toBeDefined()
+  await ui.press({ key: 'month' })
+  expect(await ui.find({ type: 'Text', text: /This Mac has spent \$212\.00 this month.*Your limit is \$1000/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the model shows its family, and a switch asks first with what it costs', async ($, on) => {
+  const runs: { command: string; args: string }[] = []
+  engine(on)
+  on('command.run', (_: unknown, e: any) => {
+    runs.push({ command: e.command, args: e.args })
+    return { text: '' }
+  })
+  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(render('terminal'))
+  expect(await ui.find({ type: 'Text', text: /^opus$/ })).toBeDefined()
+  await ui.press({ key: 'model' })
+  expect(await ui.find({ type: 'Text', text: /reloads the whole chat/ })).toBeDefined()
+  expect(await ui.find({ key: 'to-opus' })).toBeUndefined()
+  await ui.press({ key: 'to-sonnet' })
+  expect(runs).toEqual([{ command: 'model', args: 'sonnet' }])
+  expect(await ui.find({ type: 'Text', text: /reloads the whole chat/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a click on effort sets the next one, and each main request carries it', async ($, on) => {
+  const sent: unknown[] = []
+  engine(on)
+  // This hook stands for the engine's request.
+  on('turn.step', async function* (_: unknown, e: any) {
+    sent.push(e.effort)
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(render('terminal'))
+  expect(await ui.find({ type: 'Text', text: /^effort$/ })).toBeDefined()
+  await ui.press({ key: 'effort' })
+  expect(await ui.find({ type: 'Text', text: /^high$/ })).toBeDefined()
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: OPUS, effort: 'medium', messageCount: 1 } as any)) {
+    // drain
+  }
+  expect(sent).toEqual(['high'])
   await ui.unmount()
 })

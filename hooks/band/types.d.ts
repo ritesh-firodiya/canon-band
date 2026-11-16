@@ -1,7 +1,12 @@
-export type Info = 'awake' | 'mode' | 'size' | 'cost' | '7D' | '5H' | 'ctx' | 'cache'
+export type Info = 'awake' | 'mode' | 'size' | 'cost' | '7D' | '5H' | 'Spend' | 'month' | 'effort' | 'ctx' | 'cache'
 export type Level = 'ok' | 'warn' | 'bad'
 export type ReplySize = 'S' | 'M' | 'L'
 export type Mode = 'manual' | 'assisted'
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type Family = 'fable' | 'opus' | 'sonnet' | 'haiku'
+
+/** This Mac's spend in one month, by session, so a resumed session counts once. */
+export type MonthSpend = { month: string; sessions: Record<string, number> }
 
 export type Blocked = { command: string; what: string }
 
@@ -28,6 +33,10 @@ declare module 'claude-code' {
       mode: Mode
       recommendation: string | null
       blocked: Blocked | null
+      effort: Effort | null
+      seenEffort: Effort | null
+      monthUsd: number
+      isPicking: boolean
     }
   }
 }

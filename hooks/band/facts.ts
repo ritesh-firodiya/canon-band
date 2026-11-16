@@ -1,7 +1,7 @@
 // Pure helpers for the band: no `$`, so the tests call them directly.
 
 import { priceOf } from './prices'
-import type { CacheFacts, ContextFacts, ContextRow, Info, Level, Mode, ReplySize, UsageWindow } from './types'
+import type { CacheFacts, ContextFacts, ContextRow, Effort, Family, Info, Level, Mode, MonthSpend, ReplySize, UsageWindow } from './types'
 
 export const TTL_MS = 60 * 60 * 1000
 const HIGH_AT = 80
@@ -44,8 +44,9 @@ export interface WindowView {
 /** How much is used decides the colour: red when it is about to run out. */
 export const levelOf = (used: number): Level => (used >= HIGH_AT ? 'bad' : used >= WARN_AT ? 'warn' : 'ok')
 
-const NAMES: Record<string, string> = { seven_day: '7D', five_hour: '5H' }
-const ORDER: Record<string, number> = { seven_day: 0, five_hour: 1 }
+// spend_limit comes from a Claude gateway that reports the company's spend limit, as on an enterprise Bedrock setup.
+const NAMES: Record<string, string> = { seven_day: '7D', five_hour: '5H', spend_limit: 'Spend' }
+const ORDER: Record<string, number> = { seven_day: 0, five_hour: 1, spend_limit: 2 }
 
 /** Usage so far, rising from 0, led by the time left until the window resets: `3d 59%`, `2h 4%`. */
 export function windowViews(windows: readonly UsageWindow[], now: number): WindowView[] {
@@ -149,6 +150,53 @@ export function recommendationOf(answer: string): string | null {
   return text ? text : null
 }
 
+export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+export const nextEffort = (effort: Effort): Effort => EFFORTS[(EFFORTS.indexOf(effort) + 1) % EFFORTS.length] as Effort
+export const isEffort = (value: unknown): value is Effort => EFFORTS.includes(value as Effort)
+
+export const FAMILIES: readonly Family[] = ['fable', 'opus', 'sonnet', 'haiku']
+// The latest of each family, to price a switch. shortcut: written by hand, add a family's new model when it ships.
+const LATEST: Record<Family, string> = { fable: 'claude-fable-5-1', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5' }
+
+/** The family a model id runs, Bedrock and dated ids too; null for one outside them. */
+export const familyOf = (model: string): Family | null => (/fable|mythos/.test(model) ? 'fable' : (FAMILIES.find(f => model.includes(f)) ?? null))
+
+/** What the first message after a switch costs: the whole chat is written to the new model's cache. */
+export function switchUsd(tokens: number, to: Family): number | null {
+  const price = priceOf(LATEST[to], tokens)
+  return price && tokens > 0 ? (tokens * price.write1h) / PER_MILLION : null
+}
+
+export const switchLabel = (to: Family, usd: number | null): string => (usd === null ? to : `${to} ~${round(usd)}`)
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** `2026-11`, in this Mac's own calendar. */
+export const monthOf = (now: number): string => {
+  const d = new Date(now)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** This session's spend added to the month's; a new month starts from zero. */
+export function addSpend(store: MonthSpend | null, month: string, sessionId: string, usd: number): MonthSpend {
+  const sessions = store?.month === month ? store.sessions : {}
+  return { month, sessions: { ...sessions, [sessionId]: Math.max(usd, sessions[sessionId] ?? 0) } }
+}
+
+export const monthTotal = (store: MonthSpend | null, month: string): number => (store?.month === month ? Object.values(store.sessions).reduce((a, b) => a + b, 0) : 0)
+
+export interface MonthView {
+  label: string
+  level: Level
+}
+
+/** `Nov $212`, or `Nov $212/$1000` with a budget set, coloured by its share of the budget. */
+export function monthView(month: string, usd: number, budget: number | null): MonthView {
+  const name = MONTHS[Number(month.slice(5)) - 1] ?? month
+  const spent = `$${Math.round(usd)}`
+  if (!budget) return { label: `${name} ${spent}`, level: 'ok' }
+  return { label: `${name} ${spent}/$${Math.round(budget)}`, level: levelOf((usd / budget) * 100) }
+}
+
 export interface InfoFacts {
   isAwake: boolean
   mode: Mode
@@ -158,6 +206,9 @@ export interface InfoFacts {
   context: ContextView | null
   breakdown: readonly ContextRow[] | null
   cache: CacheView | null
+  effort: Effort | null
+  monthUsd: number
+  budget: number | null
 }
 
 /** The one line a click on a short item shows, so a glyph never has to be guessed. */
@@ -172,6 +223,9 @@ export function infoLine(info: Info, f: InfoFacts): string {
   if (info === 'cost') return `This session has spent ${money(f.sessionUsd)}.`
   if (info === '7D') return limit('7D', 'Weekly limit')
   if (info === '5H') return limit('5H', '5-hour limit')
+  if (info === 'Spend') return limit('Spend', 'Spend limit')
+  if (info === 'effort') return f.effort ? `Effort ${f.effort}: how hard the model thinks. Click again for the next one; the cache holds.` : "Effort: the model's own default. Click to set one; the cache holds."
+  if (info === 'month') return `This Mac has spent ${money(f.monthUsd)} this month, in sessions with canon-band.${f.budget ? ` Your limit is $${Math.round(f.budget)}, set in the plugin settings; other machines and people are not counted.` : ' Set your monthly limit in the plugin settings to see it against that.'}`
   if (info === 'ctx') {
     if (!f.context) return 'ctx: no reading yet.'
     const head = `ctx: ${tokens(f.context.tokens)} of ${tokens(f.context.window)} tokens used (${f.context.percent}%).${f.context.percent >= HIGH_AT ? ' Compact or start a new session.' : ''}`

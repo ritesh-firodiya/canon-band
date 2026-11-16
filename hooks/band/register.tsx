@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import { cacheView, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, money, nextMode, nextSize, recommendationOf, replyRule, windowViews } from './facts'
+import { addSpend, cacheView, canExtend, coldLabel, contextView, extendLabel, FAMILIES, familyOf, infoLine, isEffort, isNarrow, isTyped, money, monthOf, monthTotal, monthView, nextEffort, nextMode, nextSize, recommendationOf, replyRule, switchLabel, switchUsd, windowViews } from './facts'
 import { commandRisk, readRisk } from './guard'
-import type { Blocked, CacheFacts, ContextFacts, ContextRow, Info, Level, Mode, ReplySize, UsageWindow } from './types'
+import type { Blocked, CacheFacts, ContextFacts, ContextRow, Effort, Family, Info, Level, Mode, MonthSpend, ReplySize, UsageWindow } from './types'
 
 // The band above the prompt: the awake toggle, cost, mode and reply size on the left, usage, context and cache on the right.
 // What needs the person (a blocked command, a recommendation) gets its own row above it.
@@ -30,6 +30,24 @@ const replySize = atom({ plugin: 'canon-band', key: 'replySize' } as const, 'S' 
 const mode = atom({ plugin: 'canon-band', key: 'mode' } as const, 'assisted' as Mode)
 const recommendation = atom({ plugin: 'canon-band', key: 'recommendation' } as const, null as string | null)
 const blocked = atom({ plugin: 'canon-band', key: 'blocked' } as const, null as Blocked | null)
+// The effort the person picked on the band, and the one the engine last sent; null until there is one.
+const effort = atom({ plugin: 'canon-band', key: 'effort' } as const, null as Effort | null)
+const seenEffort = atom({ plugin: 'canon-band', key: 'seenEffort' } as const, null as Effort | null)
+const monthUsd = atom({ plugin: 'canon-band', key: 'monthUsd' } as const, 0)
+const isPicking = atom({ plugin: 'canon-band', key: 'isPicking' } as const, false)
+
+// This Mac's spend by month, across sessions.
+const MONTH_KEY = 'month'
+
+/** Adds this session's spend to the month's, and shows the month's total. */
+async function recordSpend($: EngineInterface, usd: number | null): Promise<void> {
+  const month = monthOf(await $.clock.now())
+  const stored = ((await $.store.get(MONTH_KEY)) ?? null) as MonthSpend | null
+  // shortcut: a session that runs across a month's end counts all of it in the new month; split it if anyone needs exact months.
+  const next = usd === null ? stored : addSpend(stored, month, await $.session.id(), usd)
+  if (next !== stored) await $.store.set(MONTH_KEY, next)
+  await update($, monthUsd, () => monthTotal(next, month))
+}
 
 // Headless runs (Archon, Babul, `claude -p`) have no one to click Allow once; Babul's own hook guards those.
 let isInteractive = false
@@ -113,13 +131,16 @@ async function showPanel($: EngineInterface, name: Info | null): Promise<void> {
   })
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const budget = Number(options.monthlyBudgetUsd) > 0 ? Number(options.monthlyBudgetUsd) : null
+
   on('session.start', async ($, e, next) => {
     isInteractive = e.isInteractive
     await setAwake($, false)
     $.clock.every(TICK_MS, async () => $.ui.invalidate('ui.render'))
     const result = await next(e)
     if (isInteractive) await refreshContext($).catch(() => undefined)
+    await recordSpend($, null).catch(() => undefined)
     return result
   }).catch(($, e, next) => next(e))
 
@@ -159,11 +180,14 @@ export const register: Register = on => {
 
   on('turn.step', async function* ($, e, next) {
     // Each main request reads or writes the cache, so its start restarts the hour.
-    if (!e.agentId) {
-      const now = await $.clock.now()
-      await update($, cache, c => ({ lastAt: now, tokens: c?.tokens ?? 0, model: e.model }))
-    }
-    yield* next(e)
+    if (e.agentId) return yield* next(e)
+    const now = await $.clock.now()
+    await update($, cache, c => ({ lastAt: now, tokens: c?.tokens ?? 0, model: e.model }))
+    // An effort picked on the band goes with each main request; changing it keeps the cache.
+    const picked = await read($, effort)
+    const sent = picked ?? e.effort
+    if (isEffort(sent)) await update($, seenEffort, () => sent)
+    yield* next(picked ? { ...e, effort: picked } : e)
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -172,6 +196,7 @@ export const register: Register = on => {
     await update($, isExtending, () => false)
     if ((await read($, mode)) === 'assisted' && e.reason === 'answer') await update($, recommendation, () => recommendationOf(e.answer))
     await refreshUsage($, await $.clock.now(), e.usage?.model ?? null)
+    await recordSpend($, (await $.session.usage()).cost?.usd ?? null).catch(() => undefined)
     return result
   }).catch(($, e, next) => next(e))
 
@@ -192,6 +217,11 @@ export const register: Register = on => {
     const current = await read($, mode)
     const pick = await read($, recommendation)
     const stopped = await read($, blocked)
+    const family = familyOf(await $.session.model())
+    const shownEffort = (await read($, effort)) ?? (await read($, seenEffort))
+    const picking = await read($, isPicking)
+    const tokensNow = (await read($, cache))?.tokens ?? (await read($, context))?.tokens ?? 0
+    const spentThisMonth = await read($, monthUsd)
 
     const toggle = (name: Info) => async () => showPanel($, (await read($, panel)) === name ? null : name)
     // An action says what it did, so a second click acts again instead of closing.
@@ -219,12 +249,24 @@ export const register: Register = on => {
       <Button key={key} plain onPress={onPress}><Text color={color} dimColor={!color}>{label}</Text></Button>
     )
 
+    const switchTo = async (to: Family | null) => {
+      await update($, isPicking, () => false)
+      if (to) void $.command.run({ command: 'model', args: to })
+    }
+    const pickModel = [
+      <Text key="switch">Switch model: the next message reloads the whole chat.</Text>,
+      ...FAMILIES.filter(f => f !== family).map(f => button(`to-${f}`, `[${switchLabel(f, switchUsd(tokensNow, f))}]`, AMBER, () => switchTo(f))),
+      button('cancel', '[Cancel]', undefined, () => switchTo(null)),
+    ]
+
     // What needs the person, on its own row above the band: a blocked command first, then a recommendation.
     const needs = stopped
       ? [<Text key="ask" color={RED}>{`Claude wants to run ${stopped.what}: ${stopped.command.slice(0, 60)}`}</Text>, button('allow', '[Allow once]', GREEN, () => allow(stopped, true)), button('block', '[Block]', RED, () => allow(stopped, false))]
       : pick && current === 'assisted' && !e.props.isWorking
         ? [<Text key="pick">{`Claude recommends: ${pick.slice(0, 70)}`}</Text>, button('go', '[Go with it]', GREEN, () => answer(`Go with your recommendation: ${pick}`)), button('skip', '[Not now]', undefined, async () => update($, recommendation, () => null))]
-        : []
+        : picking
+          ? pickModel
+          : []
 
     const left = [
       <Button key="awake" plain onPress={async () => { await setAwake($, !awake); await say('awake') }}>
@@ -233,11 +275,18 @@ export const register: Register = on => {
       button('cost', money(sessionUsd), undefined, toggle('cost')),
       button('mode', current, current === 'assisted' ? GREEN : undefined, async () => { await update($, mode, nextMode); await say('mode') }),
       button('size', size, AMBER, async () => { await update($, replySize, nextSize); await say('size') }),
+      button('model', family ?? 'model', undefined, async () => update($, isPicking, p => !p)),
+      button('effort', shownEffort ?? 'effort', undefined, async () => { await update($, effort, () => nextEffort(shownEffort ?? 'medium')); await say('effort') }),
     ]
 
     const warm = view?.mode === 'warm' ? view : null
     const right = [
       ...usage.map(w => button(w.name, w.label, LEVEL_COLOR[w.level], toggle(w.name as Info))),
+      // Off a Claude plan (Bedrock, Vertex, an API key) there are no 7D or 5H windows, so this Mac's month stands in.
+      !usage.some(w => w.name !== 'Spend') || budget ? (() => {
+        const m = monthView(monthOf(now), spentThisMonth, budget)
+        return button('month', m.label, LEVEL_COLOR[m.level], toggle('month'))
+      })() : null,
       ctx ? button('ctx', ctx.label, LEVEL_COLOR[ctx.level], showContext) : null,
       view?.mode === 'cold' ? button('cache', coldLabel(view.nextUsd), AMBER, toggle('cache')) : null,
       extending ? <Text key="extending" dimColor>extending...</Text> : null,
@@ -253,7 +302,7 @@ export const register: Register = on => {
       </Box>
     )
     const rows = isNarrow(e.props.bodyColumns) ? [row('controls', left, []), row('limits', [], right)] : [row('band', left, right)]
-    const line = open ? infoLine(open, { isAwake: awake, mode: current, size, sessionUsd, windows: usage, context: ctx, breakdown: await read($, breakdown), cache: view }) : ''
+    const line = open ? infoLine(open, { isAwake: awake, mode: current, size, sessionUsd, windows: usage, context: ctx, breakdown: await read($, breakdown), cache: view, effort: shownEffort, monthUsd: spentThisMonth, budget }) : ''
     const mine = (
       <Box flexDirection="column" width={e.props.bodyColumns}>
         {needs.length ? row('needs', needs, []) : null}
