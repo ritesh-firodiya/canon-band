@@ -1,12 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import { addSpend, cacheView, canExtend, coldLabel, contextView, extendLabel, FAMILIES, familyOf, infoLine, isEffort, isNarrow, isTyped, money, monthOf, monthTotal, monthView, nextEffort, nextMode, nextSize, recommendationOf, replyRule, switchLabel, switchUsd, windowViews } from './facts'
+import { addSpend, cacheView, canExtend, coldLabel, contextView, extendLabel, FAMILIES, familyOf, infoLine, isEffort, isNarrow, isTyped, money, monthOf, monthTotal, monthView, nextEffort, nextSize, replyRule, switchLabel, switchUsd, windowViews } from './facts'
 import { commandRisk, readRisk } from './guard'
-import type { Blocked, CacheFacts, ContextFacts, ContextRow, Effort, Family, Info, Level, Mode, MonthSpend, ReplySize, UsageWindow } from './types'
+import type { Blocked, CacheFacts, ContextFacts, ContextRow, Effort, Family, Info, Level, MonthSpend, ReplySize, UsageWindow } from './types'
 
-// The band above the prompt: the awake toggle, cost, mode and reply size on the left, usage, context and cache on the right.
-// What needs the person (a blocked command, a recommendation) gets its own row above it.
+// The band above the prompt: the awake toggle, cost and reply size on the left, usage, context and cache on the right.
+// What needs the person (a blocked command, the model picker) gets its own row above it.
 // Cache and usage logic follow ribbon (MIT, robonuggets/ribbon).
 
 const TICK_MS = 30_000
@@ -27,8 +27,6 @@ const context = atom({ plugin: 'canon-band', key: 'context' } as const, null as 
 const breakdown = atom({ plugin: 'canon-band', key: 'breakdown' } as const, null as ContextRow[] | null)
 const isAwake = atom({ plugin: 'canon-band', key: 'isAwake' } as const, false)
 const replySize = atom({ plugin: 'canon-band', key: 'replySize' } as const, 'S' as ReplySize)
-const mode = atom({ plugin: 'canon-band', key: 'mode' } as const, 'assisted' as Mode)
-const recommendation = atom({ plugin: 'canon-band', key: 'recommendation' } as const, null as string | null)
 const blocked = atom({ plugin: 'canon-band', key: 'blocked' } as const, null as Blocked | null)
 // The effort the person picked on the band, and the one the engine last sent; null until there is one.
 const effort = atom({ plugin: 'canon-band', key: 'effort' } as const, null as Effort | null)
@@ -151,7 +149,6 @@ export const register: Register = (on, options) => {
       await update($, cache, () => null)
       await update($, context, () => null)
       await update($, breakdown, () => null)
-      await update($, recommendation, () => null)
       if (e.source === 'clear') await update($, panel, () => null)
       await refreshContext($).catch(() => undefined)
     } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
@@ -166,11 +163,10 @@ export const register: Register = (on, options) => {
     return result
   }).catch(($, e, next) => next(e))
 
-  // Beside the prompt, not in the system prompt, so a new size or mode keeps the cache.
+  // Beside the prompt, not in the system prompt, so a new size keeps the cache.
   on('prompt.submit', async ($, e, next) => {
-    await update($, recommendation, () => null)
     if (!isTyped(e.text, e.origin.kind)) return next(e)
-    return next({ ...e, context: [...(e.context ?? []), replyRule(await read($, replySize), await read($, mode))] })
+    return next({ ...e, context: [...(e.context ?? []), replyRule(await read($, replySize))] })
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => (await guard($, e.command, commandRisk(e.command))) ?? next(e))
@@ -194,7 +190,6 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     if (e.agentId) return result
     await update($, isExtending, () => false)
-    if ((await read($, mode)) === 'assisted' && e.reason === 'answer') await update($, recommendation, () => recommendationOf(e.answer))
     await refreshUsage($, await $.clock.now(), e.usage?.model ?? null)
     await recordSpend($, (await $.session.usage()).cost?.usd ?? null).catch(() => undefined)
     return result
@@ -214,8 +209,6 @@ export const register: Register = (on, options) => {
     const ctx = contextView(await read($, context))
     const awake = await read($, isAwake)
     const size = await read($, replySize)
-    const current = await read($, mode)
-    const pick = await read($, recommendation)
     const stopped = await read($, blocked)
     const family = familyOf(await $.session.model())
     const shownEffort = (await read($, effort)) ?? (await read($, seenEffort))
@@ -236,10 +229,6 @@ export const register: Register = (on, options) => {
       await say('cache')
       void $.prompt.submit({ text: EXTEND_MESSAGE })
     }
-    const answer = async (text: string) => {
-      await update($, recommendation, () => null)
-      void $.prompt.submit({ text })
-    }
     const allow = async (b: Blocked, isAllowed: boolean) => {
       await update($, blocked, () => null)
       if (isAllowed) allowedOnce.add(b.command)
@@ -259,21 +248,18 @@ export const register: Register = (on, options) => {
       button('cancel', '[Cancel]', undefined, () => switchTo(null)),
     ]
 
-    // What needs the person, on its own row above the band: a blocked command first, then a recommendation.
+    // What needs the person, on its own row above the band: a blocked command first, then the model picker.
     const needs = stopped
       ? [<Text key="ask" color={RED}>{`Claude wants to run ${stopped.what}: ${stopped.command.slice(0, 60)}`}</Text>, button('allow', '[Allow once]', GREEN, () => allow(stopped, true)), button('block', '[Block]', RED, () => allow(stopped, false))]
-      : pick && current === 'assisted' && !e.props.isWorking
-        ? [<Text key="pick">{`Claude recommends: ${pick.slice(0, 70)}`}</Text>, button('go', '[Go with it]', GREEN, () => answer(`Go with your recommendation: ${pick}`)), button('skip', '[Not now]', undefined, async () => update($, recommendation, () => null))]
-        : picking
-          ? pickModel
-          : []
+      : picking
+        ? pickModel
+        : []
 
     const left = [
       <Button key="awake" plain onPress={async () => { await setAwake($, !awake); await say('awake') }}>
         <Text color={awake ? GREEN : undefined} bold={awake}>{awake ? '☀︎' : '☼'}</Text>
       </Button>,
       button('cost', money(sessionUsd), undefined, toggle('cost')),
-      button('mode', current, current === 'assisted' ? GREEN : undefined, async () => { await update($, mode, nextMode); await say('mode') }),
       button('size', size, AMBER, async () => { await update($, replySize, nextSize); await say('size') }),
       button('model', family ?? 'model', undefined, async () => update($, isPicking, p => !p)),
       button('effort', shownEffort ?? 'effort', undefined, async () => { await update($, effort, () => nextEffort(shownEffort ?? 'medium')); await say('effort') }),
@@ -302,7 +288,7 @@ export const register: Register = (on, options) => {
       </Box>
     )
     const rows = isNarrow(e.props.bodyColumns) ? [row('controls', left, []), row('limits', [], right)] : [row('band', left, right)]
-    const line = open ? infoLine(open, { isAwake: awake, mode: current, size, sessionUsd, windows: usage, context: ctx, breakdown: await read($, breakdown), cache: view, effort: shownEffort, monthUsd: spentThisMonth, budget }) : ''
+    const line = open ? infoLine(open, { isAwake: awake, size, sessionUsd, windows: usage, context: ctx, breakdown: await read($, breakdown), cache: view, effort: shownEffort, monthUsd: spentThisMonth, budget }) : ''
     const mine = (
       <Box flexDirection="column" width={e.props.bodyColumns}>
         {needs.length ? row('needs', needs, []) : null}

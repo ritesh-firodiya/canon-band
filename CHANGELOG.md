@@ -1,5 +1,11 @@
 # Changelog
 
+## 9.0.0 — 2026-11-16
+
+### Removed
+
+- **Modes are gone.** No more `assisted` and `manual`, no `Recommend:` line and no **Go with it** button. Claude no longer stops at each choice to wait for a click, so long autonomous runs keep going. Risky commands still wait for **Allow once**.
+
 ## 8.1.0 — 2026-11-16
 
 ### Added

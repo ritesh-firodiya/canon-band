@@ -1,7 +1,7 @@
 // Pure helpers for the band: no `$`, so the tests call them directly.
 
 import { priceOf } from './prices'
-import type { CacheFacts, ContextFacts, ContextRow, Effort, Family, Info, Level, Mode, MonthSpend, ReplySize, UsageWindow } from './types'
+import type { CacheFacts, ContextFacts, ContextRow, Effort, Family, Info, Level, MonthSpend, ReplySize, UsageWindow } from './types'
 
 export const TTL_MS = 60 * 60 * 1000
 const HIGH_AT = 80
@@ -124,31 +124,15 @@ const SIZE_WORDS: Record<ReplySize, string> = {
   L: 'the answer first, then steps, reasons and trade-offs',
 }
 
-export const MODES: readonly Mode[] = ['assisted', 'manual']
-export const nextMode = (mode: Mode): Mode => (mode === 'assisted' ? 'manual' : 'assisted')
-
-const RECOMMEND = 'Recommend:'
-const ASSISTED_RULE = `When you end with a choice the person can accept, add one last line: "${RECOMMEND} <what you would do, in a few plain words>".`
-
-/** What the model reads beside each prompt, so the size and mode hold without touching the cached system prompt. */
-export function replyRule(size: ReplySize, mode: Mode): string {
-  const rule = `Reply size ${size}: write ${SIZE_WORDS[size]}, in plain words, the way a person talks. The person set this on the band; it overrides other length guidance.`
-  return mode === 'assisted' ? `${rule} ${ASSISTED_RULE}` : rule
-}
+/** What the model reads beside each prompt, so the size holds without touching the cached system prompt. */
+export const replyRule = (size: ReplySize): string =>
+  `Reply size ${size}: write ${SIZE_WORDS[size]}, in plain words, the way a person talks. The person set this on the band; it overrides other length guidance.`
 
 // The person's own message: Enter at the prompt, or the phone through Remote Control. Never an SDK run, a schedule or another agent.
 const PERSON = new Set(['composer', 'bridge'])
 
 /** A prompt the person typed, not a slash command. Only these carry the reply rule. */
 export const isTyped = (text: string, origin: string): boolean => PERSON.has(origin) && text.trim() !== '' && !text.trimStart().startsWith('/')
-
-/** The last "Recommend:" line of an answer, or null when it has none. */
-export function recommendationOf(answer: string): string | null {
-  const lines = answer.split('\n').map(l => l.replace(/[*_`]/g, '').trim())
-  const last = lines.filter(l => l.startsWith(RECOMMEND)).at(-1)
-  const text = last?.slice(RECOMMEND.length).trim()
-  return text ? text : null
-}
 
 export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 export const nextEffort = (effort: Effort): Effort => EFFORTS[(EFFORTS.indexOf(effort) + 1) % EFFORTS.length] as Effort
@@ -199,7 +183,6 @@ export function monthView(month: string, usd: number, budget: number | null): Mo
 
 export interface InfoFacts {
   isAwake: boolean
-  mode: Mode
   size: ReplySize
   sessionUsd: number
   windows: readonly WindowView[]
@@ -219,7 +202,6 @@ export function infoLine(info: Info, f: InfoFacts): string {
   }
   if (info === 'awake') return f.isAwake ? '☀ Awake: this Mac will not sleep while this session is open. Click again to let it sleep.' : '☼ This session is not keeping the Mac awake. Click to keep it awake while this session is open.'
   if (info === 'size') return `Reply size ${f.size}: ${SIZE_WORDS[f.size]}. Click again for the next size.`
-  if (info === 'mode') return f.mode === 'assisted' ? 'Assisted: when Claude recommends something, a Go with it button sends it on. Click for manual.' : 'Manual: no recommendation button. Click for assisted.'
   if (info === 'cost') return `This session has spent ${money(f.sessionUsd)}.`
   if (info === '7D') return limit('7D', 'Weekly limit')
   if (info === '5H') return limit('5H', '5-hour limit')

@@ -1,7 +1,6 @@
-export type Info = 'awake' | 'mode' | 'size' | 'cost' | '7D' | '5H' | 'Spend' | 'month' | 'effort' | 'ctx' | 'cache'
+export type Info = 'awake' | 'size' | 'cost' | '7D' | '5H' | 'Spend' | 'month' | 'effort' | 'ctx' | 'cache'
 export type Level = 'ok' | 'warn' | 'bad'
 export type ReplySize = 'S' | 'M' | 'L'
-export type Mode = 'manual' | 'assisted'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type Family = 'fable' | 'opus' | 'sonnet' | 'haiku'
 
@@ -30,8 +29,6 @@ declare module 'claude-code' {
       breakdown: ContextRow[] | null
       isAwake: boolean
       replySize: ReplySize
-      mode: Mode
-      recommendation: string | null
       blocked: Blocked | null
       effort: Effort | null
       seenEffort: Effort | null

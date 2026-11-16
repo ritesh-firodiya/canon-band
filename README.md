@@ -8,10 +8,10 @@
 
 canon-band is a Claude Code mod. It adds no skills, no system prompt text and no
 server. The only thing it sends is a short note beside each prompt you type,
-about 75 tokens, with your reply size and mode.
+about 75 tokens, with your reply size.
 
 ```
-☼  $1.20  assisted  S  opus  high            3d 59%  2h 4%  ctx 23k  ↻ 53m +$0.17
+☼  $1.20  S  opus  high            3d 59%  2h 4%  ctx 23k  ↻ 53m +$0.17
 ╭──────────────────────────────────────────────────────────────────────────╮
 │ > your prompt                                                            │
 ╰──────────────────────────────────────────────────────────────────────────╯
@@ -22,7 +22,6 @@ what it means in one line, which closes by itself.
 
 - **☼ Awake:** a click turns it into a green ☀ that keeps this Mac and its screen awake while the session is open. macOS only.
 - **Cost:** what this session has spent.
-- **Mode:** `assisted` (the default) or `manual`. In assisted, Claude ends a choice with a `Recommend:` line, and a **Go with it** button sends it on. Manual adds no button.
 - **Reply size:** S (the default), M or L. S is one to three short lines, M the answer and a short list, L the answer with steps and trade-offs. Every size asks for plain words, the way a person talks.
 - **Model:** the family the session runs (`fable`, `opus`, `sonnet`, `haiku`). A click opens a row with the others, each with what the next message costs, since a switch reloads the whole chat into the new model's cache. A pick runs `/model`.
 - **Effort:** how hard the model thinks. A click goes low, medium, high, xhigh, max and round, and each main request carries it. The cache holds. Before the first reply it shows `effort`, meaning the model's own default.
@@ -36,14 +35,13 @@ What needs you gets its own row above the band, one thing at a time:
 
 ```
 Claude wants to run a push: git push origin main    [Allow once]  [Block]
-Claude recommends: rename the repo                  [Go with it]  [Not now]
 ```
 
-Mode and reply size start over in each new session.
+Reply size starts over in each new session.
 
 ## A yes before anything risky
 
-In every mode, these wait for **Allow once**:
+These wait for **Allow once**:
 
 - **Deletes:** `rm -r`, `git reset --hard`, `git clean -f`, `git branch -D`, `git filter-repo`, dropping or truncating a table, database or schema, and a database reset (Prisma, Supabase, Drizzle).
 - **Pushes:** any `git push`.

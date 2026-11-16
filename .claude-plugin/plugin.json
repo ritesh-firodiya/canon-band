@@ -1,7 +1,7 @@
 {
   "name": "canon-band",
-  "version": "8.1.0",
-  "description": "Usage above the Claude Code prompt, short plain replies, a Go with it button for recommendations, and a yes before anything risky.",
+  "version": "9.0.0",
+  "description": "Usage above the Claude Code prompt, short plain replies, and a yes before anything risky.",
   "types": "./hooks/band/types.d.ts",
   "author": {
     "name": "Ritesh Firodiya"

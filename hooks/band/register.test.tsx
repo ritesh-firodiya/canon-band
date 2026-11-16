@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { addSpend, breakdownLine, cacheView, familyOf, monthTotal, monthView, nextEffort, switchLabel, switchUsd, timeLeft, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextMode, nextSize, recommendationOf, replyRule, tokens, windowViews } from './facts'
+import { addSpend, breakdownLine, cacheView, familyOf, monthTotal, monthView, nextEffort, switchLabel, switchUsd, timeLeft, canExtend, coldLabel, contextView, extendLabel, infoLine, isNarrow, isTyped, nextSize, replyRule, tokens, windowViews } from './facts'
 import { commandRisk, readRisk } from './guard'
 import { priceOf } from './prices'
 
@@ -103,11 +103,9 @@ test('the breakdown lists what fills the window, largest first, then what is fre
 
 test('reply size goes S, M, L and round, and each size tells the model what to write in plain words', () => {
   expect([nextSize('S'), nextSize('M'), nextSize('L')]).toEqual(['M', 'L', 'S'])
-  expect(replyRule('S', 'manual')).toContain('one to three short lines, no headings or tables, in plain words')
-  expect(replyRule('L', 'manual')).toContain('trade-offs')
-  expect(replyRule('S', 'manual')).not.toContain('Recommend:')
-  expect(replyRule('S', 'assisted')).toContain('"Recommend: <what you would do')
-  expect([nextMode('assisted'), nextMode('manual')]).toEqual(['manual', 'assisted'])
+  expect(replyRule('S')).toContain('one to three short lines, no headings or tables, in plain words')
+  expect(replyRule('L')).toContain('trade-offs')
+  expect(replyRule('S')).not.toContain('Recommend:')
 })
 
 test('only what the person types carries the rule: not slash commands, SDK runs, schedules or other agents', () => {
@@ -116,13 +114,6 @@ test('only what the person types carries the rule: not slash commands, SDK runs,
   expect(isTyped('/clear', 'composer')).toBe(false)
   expect(isTyped('  ', 'composer')).toBe(false)
   for (const origin of ['sdk', 'plugin', 'scheduled-trigger', 'peer', 'coordinator', 'unclassified']) expect(isTyped('why?', origin)).toBe(false)
-})
-
-test('the last Recommend: line is the pick, markdown and all', () => {
-  expect(recommendationOf('Two ways.\n\nRecommend: rename the repo to canon-band')).toBe('rename the repo to canon-band')
-  expect(recommendationOf('**Recommend:** keep it\nRecommend: `drop it`')).toBe('drop it')
-  expect(recommendationOf('Done. Tests pass.')).toBeNull()
-  expect(recommendationOf('Recommend:')).toBeNull()
 })
 
 test('critical commands need the person, everyday ones do not', () => {
@@ -142,7 +133,7 @@ test('a narrow terminal uses two rows', () => {
 })
 
 test('a click on a short item says what it means in one line', () => {
-  const base = { isAwake: false, mode: 'assisted' as const, size: 'M' as const, sessionUsd: 1.2, windows: windowViews([{ kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T09:00:00Z' }], Date.parse('2026-11-02T00:00:00Z')), context: contextView({ tokens: 80_000, window: 200_000, percent: 40 }), breakdown: null, cache: null }
+  const base = { isAwake: false, size: 'M' as const, sessionUsd: 1.2, windows: windowViews([{ kind: 'seven_day', percentUsed: 91, resetsAt: '2026-11-05T09:00:00Z' }], Date.parse('2026-11-02T00:00:00Z')), context: contextView({ tokens: 80_000, window: 200_000, percent: 40 }), breakdown: null, cache: null }
   expect(infoLine('awake', base)).toContain('not keeping the Mac awake')
   expect(infoLine('awake', { ...base, isAwake: true })).toContain('will not sleep')
   expect(infoLine('size', base)).toContain('short bullet list')
@@ -151,17 +142,14 @@ test('a click on a short item says what it means in one line', () => {
   expect(infoLine('5H', base)).toBe('5-hour limit: no reading yet.')
   expect(infoLine('ctx', base)).toBe('ctx: 80k of 200k tokens used (40%).')
   expect(infoLine('ctx', { ...base, breakdown: ROWS })).toContain('\n  System tools          14k\n  Messages               6k')
-  expect(infoLine('mode', base)).toContain('Assisted')
-
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`on ${surface}, the band draws the sun, the cost, the mode, the reply size and the context`, async ($, on) => {
+  test(`on ${surface}, the band draws the sun, the cost, the reply size and the context`, async ($, on) => {
     engine(on)
     await $.session.start({ cwd: '/w/shop', surface, isInteractive: true })
     const ui = await $.ui.mount(render(surface))
     expect(await ui.find({ type: 'Text', text: /☼/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^assisted$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^S$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^\$0\.00$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ctx 23k$/ })).toBeDefined()
@@ -226,7 +214,7 @@ test('the reply size starts at S, a click moves it on, and only a typed prompt c
   await $.prompt.submit({ text: '/clear', origin: { kind: 'composer' } })
   await $.prompt.submit({ text: 'run the turn', origin: { kind: 'sdk' } })
   expect(seen[0]?.at(-1)).toContain('Reply size M')
-  expect(seen[0]?.at(-1)).toContain('Recommend:')
+  expect(seen[0]?.at(-1)).not.toContain('Recommend:')
   expect(seen[1]).toBeUndefined()
   expect(seen[2]).toBeUndefined()
   await ui.unmount()
@@ -273,8 +261,8 @@ test('a panel closes by itself, and one opened later is not closed early', async
   const clock = engine(on)
   await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount(render('terminal'))
-  await ui.press({ key: 'mode' })
-  expect(await ui.find({ type: 'Text', text: /Manual: no recommendation button/ })).toBeDefined()
+  await ui.press({ key: 'cost' })
+  expect(await ui.find({ type: 'Text', text: /This session has spent/ })).toBeDefined()
   await clock!.advance(4000)
   await ui.press({ key: 'size' })
   await clock!.advance(2000)
@@ -316,24 +304,6 @@ test('a headless run is not guarded by the band', async ($, on) => {
   on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
   await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: false })
   expect(await $.tool.call({ tool: 'Bash', command: 'git push' } as any)).not.toHaveProperty('deny')
-})
-
-test('in assisted mode, a recommendation gets a Go with it button', async ($, on) => {
-  const sent: string[] = []
-  engine(on)
-  on('prompt.submit', (_: unknown, e: any) => {
-    sent.push(e.text)
-    return { text: e.text }
-  })
-  on('turn.complete', (_: unknown, e: any) => ({ text: e.answer }))
-  await $.session.start({ cwd: '/w/shop', surface: 'terminal', isInteractive: true })
-  await $.turn.complete({ answer: 'Two ways.\nRecommend: rename the repo to canon-band', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' } as any)
-  const ui = await $.ui.mount(render('terminal'))
-  expect(await ui.find({ type: 'Text', text: /Claude recommends: rename the repo to canon-band/ })).toBeDefined()
-  await ui.press({ key: 'go' })
-  expect(sent).toEqual(['Go with your recommendation: rename the repo to canon-band'])
-  expect(await ui.find({ type: 'Text', text: /Claude recommends/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('a gateway spend limit shows like the others, led by the time left', () => {
