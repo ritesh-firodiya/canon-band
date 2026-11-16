@@ -4,31 +4,37 @@
 
 <h1 align="center">canon-band</h1>
 
-<p align="center"><b>Your usage under the Claude Code prompt, short replies, and a yes before anything risky.</b></p>
+<p align="center"><b>Your Claude Code usage under the prompt, short plain replies, and a yes before anything risky.</b></p>
 
-canon-band is a Claude Code mod. It adds no skills, no startup text and no server.
+canon-band is a Claude Code mod. It adds no skills, no system prompt text and no
+server. The only thing it sends is a short note beside each prompt you type,
+about 75 tokens, with your reply size and mode.
 
 ```
                                     ☼  assisted  S  ⓘ  ↻ 53m +$0.17
 ╭──────────────────────────────────────────────────────────────────╮
 │ > your prompt                                                    │
 ╰──────────────────────────────────────────────────────────────────╯
-  ? for shortcuts · $1.20 · 7D 59% · 5H 4% · ctx 23k
+  ? for shortcuts  $1.20 · 7D 59% · 5H 4% · ctx 23k
 ```
 
 ## Under the prompt
 
+Dim, after Claude Code's own hint line:
+
 - **Cost:** what this session has spent.
-- **7D and 5H:** how much of your 7-day and 5-hour limits you have used, from 0%.
-- **ctx:** the tokens in the context window, from the moment the session loads.
+- **7D and 5H:** how much of your 7-day and 5-hour limits you have used, from 0%. Shown on a Claude plan, once the first reply comes back.
+- **ctx:** the tokens in the context window. It shows from the moment the session loads, from Claude Code's own estimate, then from each reply.
 
 ## Above the prompt
 
-- **☼ Awake:** a click turns it into a green ☀ that keeps this Mac and its screen awake while the session is open.
-- **Mode:** `assisted` or `manual`. In assisted, when Claude recommends something, a **Go with it** button sends it on.
-- **Reply size:** S (the default), M or L. Every reply is in plain words, the way a person talks. It goes beside each prompt you type, so the cache holds.
-- **ⓘ:** the cost, usage with reset times, and what fills the context: system prompt, tools, memory, messages and what is free.
-- **Prompt cache:** how long it stays warm. One click keeps it warm for another hour, and the label shows the cost first. Once cold, it shows what your next message costs.
+Each control says what it did in one line when you click it, and the line closes by itself.
+
+- **☼ Awake:** a click turns it into a green ☀ that keeps this Mac and its screen awake while the session is open. macOS only.
+- **Mode:** `assisted` (the default) or `manual`. In assisted, Claude ends a choice with a `Recommend:` line, and a **Go with it** button sends it on. Manual adds no button.
+- **Reply size:** S (the default), M or L. S is one to three short lines, M the answer and a short list, L the answer with steps and trade-offs. Every size asks for plain words, the way a person talks.
+- **ⓘ:** the cost, usage, and what fills the context, largest first: system prompt, tools, memory, messages, then what is free.
+- **Prompt cache:** `↻ 53m` is how long it stays warm. A click keeps it warm for another hour, and the label shows that cost first. Once cold, `◌ cold ~$8.00` is what your next message costs.
 
 The same row shows what needs you, one thing at a time:
 
@@ -38,16 +44,29 @@ Claude recommends: rename the repo                  [Go with it]  [Not now]
 7D 91% used, resets in 3d 9h
 ```
 
+From 80% used, 7D, 5H or ctx shows in red above the prompt, with the reset time or "compact soon".
+Mode and reply size start over in each new session.
+
 ## A yes before anything risky
 
-In every mode, these wait for **Allow once**: deletes (`rm -r`, `git reset --hard`,
-`git clean -f`, `branch -D`, dropping a table, a database reset), any `git push`,
-deploys and store submits, publishing a package or release, changing who can see
-a repo, live money commands, and reading a secret (`.env`, keys, `local/secrets`).
-Allow once lets that exact command run one time.
+In every mode, these wait for **Allow once**:
 
-Only your own sessions are guarded. Headless runs (Archon, `claude -p`) are left to
-their own hooks, and only prompts you type get the reply rule.
+- **Deletes:** `rm -r`, `git reset --hard`, `git clean -f`, `git branch -D`, `git filter-repo`, dropping or truncating a table, database or schema, and a database reset (Prisma, Supabase, Drizzle).
+- **Pushes:** any `git push`.
+- **Deploys and store submits:** Vercel, Netlify, Firebase, Fly, Wrangler, EAS submit or update, fastlane.
+- **Releases:** `npm`, `pnpm` or `yarn` publish, unpublish or deprecate, and `gh release create`.
+- **Repo changes:** `gh repo` delete, rename, archive or a visibility change.
+- **Money:** `stripe` commands with `--live`.
+- **Secrets:** reading an `.env` file (not `.env.example`), a key file (`.p8`, `.p12`, `.pem`, `.jks`, `.keystore`, `.mobileprovision`, `id_rsa`, `id_ed25519`, `credentials.json`) or anything under `local/secrets`, by a command or by Claude's Read tool.
+
+**Allow once** lets that exact command run one time, and tells Claude to run it again.
+**Block** tells Claude not to run it.
+
+It is a safety net, not a sandbox. It matches shell commands and file reads by
+pattern. Edits, MCP tools and a command written to avoid the pattern get past it.
+
+Only your own sessions are guarded, and only prompts you type get the reply note.
+Headless runs (Archon, `claude -p`, the SDK), schedules and other agents are left alone.
 
 ## Install
 
@@ -56,12 +75,15 @@ claude plugin marketplace add ritesh-firodiya/canon-band
 claude plugin install canon-band@canon-band
 ```
 
-Coming from `canon`: `claude plugin uninstall canon@canon` first. The rest of
-canon moved into Babul ([github.com/babulhq/babul](https://github.com/babulhq/babul)).
+Coming from `canon`: run `claude plugin uninstall canon@canon` first. The rest of
+canon (rules, knowledge, checks and standards) moved into
+[Babul](https://github.com/babulhq/babul).
 
 ## Develop
 
-The mod is a Claude Code hooks module in `hooks/band/`. Run its tests with
+The mod is a Claude Code hooks module in `hooks/band/`: `register.tsx` draws and
+hooks, `facts.ts` holds the pure logic, `guard.ts` the list of risky operations
+and `prices.ts` the public list prices that price the cache. Run the tests with
 `pnpm test` (it runs `claude plugin test .`).
 
 Cache and usage logic follow ribbon (MIT, robonuggets/ribbon).
